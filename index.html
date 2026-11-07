@@ -1,0 +1,1167 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Vislta</title>
+<link rel="stylesheet" href="https://fastly.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.1/css/all.min.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="perf.css">
+</head>
+<body>
+<!-- Vislta 开场动画遮罩（~2.6s 后自动淡出并由 JS 移除） -->
+<div id="splashOverlay">
+  <div class="splash-logo"><span style="--i:0">V</span><span style="--i:1">i</span><span style="--i:2">s</span><span style="--i:3">l</span><span style="--i:4">t</span><span style="--i:5">a</span></div>
+  <div class="splash-tag">相见 · 陪伴 · 倾听</div>
+  <div class="splash-dots"><i></i><i></i><i></i></div>
+</div>
+
+<!-- 全局分类下拉菜单 -->
+<div class="global-group-menu" id="globalGroupMenu">
+  <div onclick="event.stopPropagation(); editWordGroup(currentMenuGroupId)">
+    <i class="fas fa-edit"></i> 编辑分类
+  </div>
+  <div onclick="event.stopPropagation(); toggleGroupDisabled(currentMenuGroupId)">
+    <i class="fas fa-eye-slash"></i> <span id="menuToggleText">禁用</span>
+  </div>
+  <div class="danger" onclick="event.stopPropagation(); deleteWordGroup(currentMenuGroupId)">
+    <i class="fas fa-trash"></i> 删除分类
+  </div>
+</div>
+<div id="app">
+  <!-- 页面容器 -->
+  <div class="page-container" id="pageContainer">
+    
+    <!-- 聊天页面 -->
+    <div class="page active" id="chatPage">
+      <!-- 会话侧边栏 -->
+      <div class="conversation-sidebar" id="conversationSidebar">
+        <div class="sidebar-header">
+          <div class="search-box">
+            <i class="fas fa-search"></i>
+            <input type="text" id="convSearch" placeholder="搜索">
+          </div>
+          <div class="quick-add-btn contact-btn" onclick="openAddContactModal()" title="新建联系人">
+            <i class="fas fa-user-plus"></i><span class="btn-label">联系人</span>
+          </div>
+          <div class="quick-add-btn group-btn" onclick="openCreateGroupModal()" title="创建群聊">
+            <i class="fas fa-users"></i><span class="btn-label">群聊</span>
+          </div>
+        </div>
+        <div class="conversation-list" id="conversationList"></div>
+      </div>
+      
+      <!-- 聊天主区域 -->
+      <div class="chat-main" id="chatMain">
+        <div class="chat-header">
+          <div class="back-btn" id="chatBackBtn"><i class="fas fa-chevron-left"></i></div>
+          <div class="chat-title" id="chatTitle">选择一个会话</div>
+          <div class="chat-actions">
+            <div class="action-btn" id="chatCallBtn" title="语音通话"><i class="fas fa-phone"></i></div>
+            <div class="action-btn" id="chatSearchBtn" title="搜索会话消息"><i class="fas fa-search"></i></div>
+            <div class="dropdown">
+              <div class="action-btn" id="chatMenuBtn"><i class="fas fa-ellipsis-v"></i></div>
+              <div class="dropdown-menu" id="chatMenu">
+                <div class="dropdown-item" onclick="pokeContact()"><i class="fas fa-hand-pointer"></i>戳一戳</div>
+                <div class="dropdown-item" onclick="openChatSettingsHub()"><i class="fas fa-cog"></i>设置中心</div>
+                <div class="dropdown-item" onclick="viewContactInfo()"><i class="fas fa-info-circle"></i>查看资料</div>
+                <div class="dropdown-item danger" onclick="clearChatHistory()"><i class="fas fa-trash"></i>清空聊天记录</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="msg-search-bar" id="msgSearchBar" style="display:none;">
+          <div class="search-box" style="margin:0;flex:1;">
+            <i class="fas fa-search"></i>
+            <input type="text" id="msgSearchInput" placeholder="搜索当前会话消息...">
+          </div>
+          <button class="btn btn-secondary" style="padding:6px 12px;font-size:12px;" onclick="toggleMsgSearch(false)">收起</button>
+        </div>
+        <div class="msg-search-results" id="msgSearchResults" style="display:none;"></div>
+        <div class="chat-messages" id="chatMessages">
+          <div class="empty-state">
+            <i class="fas fa-comments"></i>
+            <p>选择一个联系人开始聊天</p>
+          </div>
+        </div>
+        <!-- 回到底部浮动按钮（上滑浏览历史时出现，带新消息计数） -->
+        <div class="scroll-bottom-btn" id="scrollBottomBtn" onclick="scrollToBottomSmooth()" title="回到底部">
+          <i class="fas fa-chevron-down"></i>
+          <span class="new-msg-badge" id="newMsgBadge" style="display:none;">0</span>
+        </div>
+        <div class="chat-input-area" id="chatInputArea" style="display:none;">
+          <div class="quote-preview-bar" id="quotePreviewBar">
+            <i class="fas fa-quote-left" style="color:var(--primary);font-size:11px;flex-shrink:0;"></i>
+            <div class="quote-text" id="quotePreviewText"></div>
+            <div class="quote-close" onclick="clearPendingQuote()"><i class="fas fa-times"></i></div>
+          </div>
+          <div class="input-toolbar">
+            <div class="tool-btn" id="emojiBtn" title="表情"><i class="fas fa-smile"></i></div>
+            <div class="tool-btn" id="imageBtn" title="图片"><i class="fas fa-image"></i></div>
+            <div class="tool-btn" id="continueBtn" title="说话（触发对方回复，无需发消息）"><i class="fas fa-microphone"></i></div>
+            <div class="tool-btn" id="surveyBtn" title="问卷"><i class="fas fa-clipboard-list"></i></div>
+            <div class="tool-btn" id="redpacketBtn" title="发红包 / 转账"><i class="fas fa-gift"></i></div>
+            <input type="file" id="imageUpload" accept="image/*" style="display:none;">
+          </div>
+          <div class="input-box">
+            <textarea id="messageInput" placeholder="输入消息..." rows="1"></textarea>
+            <button class="send-btn" id="sendBtn">发送</button>
+          </div>
+          <div class="emoji-panel" id="emojiPanel">
+            <div class="emoji-tabs">
+              <div class="emoji-tab active" data-tab="emoji">表情</div>
+              <div class="emoji-tab" data-tab="custom">我的表情</div>
+            </div>
+            <div class="emoji-grid" id="emojiGrid"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <!-- 通讯录页面 -->
+    <div class="page" id="contactsPage">
+      <div class="contacts-header">
+        <div class="search-box">
+          <i class="fas fa-search"></i>
+          <input type="text" id="contactSearch" placeholder="搜索联系人">
+        </div>
+        <div class="quick-add-btn contact-btn" onclick="openAddContactModal()" title="新建联系人">
+          <i class="fas fa-user-plus"></i><span class="btn-label">联系人</span>
+        </div>
+        <div class="quick-add-btn group-btn" onclick="openCreateGroupModal()" title="创建群聊">
+          <i class="fas fa-users"></i><span class="btn-label">群聊</span>
+        </div>
+      </div>
+      <div class="group-tabs" id="groupTabs"></div>
+      <div class="contacts-list" id="contactsList"></div>
+    </div>
+    
+    <!-- 信件页面 -->
+    <div class="page" id="lettersPage">
+      <div class="letters-header">
+        <div style="font-size:16px;font-weight:500;">信件</div>
+        <button class="btn btn-primary write-letter-btn" onclick="openWriteLetterModal()">
+          <i class="fas fa-pen"></i> 写新信
+        </button>
+      </div>
+      <div class="letters-toolbar">
+        <div class="search-box letters-search-box">
+          <i class="fas fa-search"></i>
+          <input type="text" id="letterSearch" placeholder="搜索标题 / 内容 / 收件人">
+        </div>
+        <div class="letter-filter-tabs" id="letterFilterTabs">
+          <div class="letter-filter-tab active" data-filter="all" onclick="setLetterFilter('all')">全部</div>
+          <div class="letter-filter-tab" data-filter="pending" onclick="setLetterFilter('pending')">等待回信</div>
+          <div class="letter-filter-tab" data-filter="replied" onclick="setLetterFilter('replied')">已回复</div>
+        </div>
+      </div>
+      <div class="letters-list" id="lettersList"></div>
+    </div>
+    
+    <!-- 朋友圈页面 -->
+    <div class="page" id="momentsPage">
+      <div class="moments-scroll" id="momentsScroll">
+        <div class="moments-cover" id="momentsCover"></div>
+        <div class="moments-user-bar">
+          <div class="moments-user-info">
+            <div id="momentsMyAvatar"></div>
+            <div class="moments-myname" id="momentsMyName">我</div>
+          </div>
+          <div class="moments-user-actions">
+            <button class="moments-mini-btn" id="momentsFilterBtn" onclick="cycleMomentsFilter()"><i class="fas fa-filter"></i> 全部</button>
+            <button class="moments-mini-btn" onclick="openMomentsBgModal()"><i class="fas fa-image"></i> 背景</button>
+            <button class="moments-mini-btn primary" onclick="openMomentsPublishModal()"><i class="fas fa-pen-nib"></i> 发布</button>
+          </div>
+        </div>
+        <div class="moments-feed" id="momentsFeed"></div>
+        <div style="height:30px;"></div>
+      </div>
+    </div>
+
+    <!-- 设置页面 -->
+    <div class="page" id="settingsPage">
+      <div class="settings-list" id="settingsList">
+        <!-- 头像设置 -->
+        <div class="settings-group">
+          <div class="settings-group-title">个人设置</div>
+          <div class="setting-item" onclick="openAvatarSetting()">
+            <div class="setting-icon"><i class="fas fa-user"></i></div>
+            <div class="setting-content">
+              <div class="setting-label">我的头像</div>
+              <div class="setting-desc">点击更换头像</div>
+            </div>
+            <div id="myAvatarPreview" class="avatar avatar-sm"></div>
+          </div>
+          <div class="setting-item" onclick="openNicknameSetting()">
+            <div class="setting-icon"><i class="fas fa-signature"></i></div>
+            <div class="setting-content">
+              <div class="setting-label">我的昵称</div>
+              <div class="setting-desc" id="myNicknameText">我</div>
+            </div>
+            <i class="fas fa-chevron-right setting-arrow"></i>
+          </div>
+        </div>
+        
+        <!-- 主题设置 -->
+        <div class="collapsible" id="themeCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-palette"></i></div>
+            <div class="collapsible-title">主题设置</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body">
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">深色模式</div>
+                <div class="setting-desc">切换浅色/深色主题</div>
+              </div>
+              <div class="toggle" id="darkModeToggle"></div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">跟随系统</div>
+                <div class="setting-desc">根据系统设置自动切换</div>
+              </div>
+              <div class="toggle" id="autoThemeToggle"></div>
+            </div>
+            <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:10px;padding-left:60px;padding-right:16px;">
+              <div>
+                <div class="setting-label">主题配色</div>
+                <div class="setting-desc">选择你喜欢的主题色调</div>
+              </div>
+              <div class="theme-swatches theme-swatches-wrapper" id="themeColorGroup">
+                <button class="theme-swatch active" data-color="blue">
+                  <span class="swatch-inner" style="background:linear-gradient(135deg, #89b8e8 0%, #a4c8eb 100%);"></span>
+                  <span class="swatch-check"><i class="fas fa-check"></i></span>
+                  <span class="swatch-label">浅蓝</span>
+                </button>
+                <button class="theme-swatch" data-color="purple">
+                  <span class="swatch-inner" style="background:linear-gradient(135deg, #b8a8e0 0%, #cfc2ec 100%);"></span>
+                  <span class="swatch-check"><i class="fas fa-check"></i></span>
+                  <span class="swatch-label">雾紫</span>
+                </button>
+                <button class="theme-swatch" data-color="mint">
+                  <span class="swatch-inner" style="background:linear-gradient(135deg, #86c9b4 0%, #a6d9c8 100%);"></span>
+                  <span class="swatch-check"><i class="fas fa-check"></i></span>
+                  <span class="swatch-label">薄荷</span>
+                </button>
+                <button class="theme-swatch" data-color="warm">
+                  <span class="swatch-inner" style="background:linear-gradient(135deg, #d8b89c 0%, #e6cdb6 100%);"></span>
+                  <span class="swatch-check"><i class="fas fa-check"></i></span>
+                  <span class="swatch-label">暖米</span>
+                </button>
+                <button class="theme-swatch" data-color="rose">
+                  <span class="swatch-inner" style="background:linear-gradient(135deg, #e8a5b8 0%, #f0c0ce 100%);"></span>
+                  <span class="swatch-check"><i class="fas fa-check"></i></span>
+                  <span class="swatch-label">玫瑰</span>
+                </button>
+                <button class="theme-swatch" data-color="teal">
+                  <span class="swatch-inner" style="background:linear-gradient(135deg, #6ec2bc 0%, #92d4cf 100%);"></span>
+                  <span class="swatch-check"><i class="fas fa-check"></i></span>
+                  <span class="swatch-label">青碧</span>
+                </button>
+                <button class="theme-swatch" data-color="indigo">
+                  <span class="swatch-inner" style="background:linear-gradient(135deg, #8e9ce0 0%, #acb8eb 100%);"></span>
+                  <span class="swatch-check"><i class="fas fa-check"></i></span>
+                  <span class="swatch-label">靛蓝</span>
+                </button>
+                <button class="theme-swatch" data-color="coral">
+                  <span class="swatch-inner" style="background:linear-gradient(135deg, #e8a880 0%, #f0c0a0 100%);"></span>
+                  <span class="swatch-check"><i class="fas fa-check"></i></span>
+                  <span class="swatch-label">珊瑚</span>
+                </button>
+                <button class="theme-swatch" data-color="midnight">
+                  <span class="swatch-inner" style="background:linear-gradient(135deg, #1c2028 0%, #3a5a82 100%);"></span>
+                  <span class="swatch-check"><i class="fas fa-check"></i></span>
+                  <span class="swatch-label">暗夜</span>
+                </button>
+              </div>
+            </div>
+            <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:10px;padding-left:60px;padding-right:16px;">
+              <div>
+                <div class="setting-label">气泡样式</div>
+                <div class="setting-desc">选择消息气泡外观</div>
+              </div>
+              <div class="bubble-styles-grid" id="bubbleStyleGroup">
+                <div class="bubble-style-card active" data-style="standard">
+                  <div class="bubble-preview">
+                    <div class="preview-row other">
+                      <span class="preview-bubble">Hi</span>
+                    </div>
+                    <div class="preview-row mine">
+                      <span class="preview-bubble">Hello</span>
+                    </div>
+                  </div>
+                  <div class="bubble-style-name">标准圆角</div>
+                </div>
+                <div class="bubble-style-card" data-style="minimal">
+                  <div class="bubble-preview">
+                    <div class="preview-row other">
+                      <span class="preview-bubble">Hi</span>
+                    </div>
+                    <div class="preview-row mine">
+                      <span class="preview-bubble">Hello</span>
+                    </div>
+                  </div>
+                  <div class="bubble-style-name">极简细线</div>
+                </div>
+                <div class="bubble-style-card" data-style="vintage">
+                  <div class="bubble-preview">
+                    <div class="preview-row other">
+                      <span class="preview-bubble">Hi</span>
+                    </div>
+                    <div class="preview-row mine">
+                      <span class="preview-bubble">Hello</span>
+                    </div>
+                  </div>
+                  <div class="bubble-style-name">古风窄边</div>
+                </div>
+                <div class="bubble-style-card" data-style="emboss">
+                  <div class="bubble-preview">
+                    <div class="preview-row other">
+                      <span class="preview-bubble">Hi</span>
+                    </div>
+                    <div class="preview-row mine">
+                      <span class="preview-bubble">Hello</span>
+                    </div>
+                  </div>
+                  <div class="bubble-style-name">浮雕拟物</div>
+                </div>
+                <div class="bubble-style-card" data-style="pixel">
+                  <div class="bubble-preview">
+                    <div class="preview-row other">
+                      <span class="preview-bubble">Hi</span>
+                    </div>
+                    <div class="preview-row mine">
+                      <span class="preview-bubble">Hello</span>
+                    </div>
+                  </div>
+                  <div class="bubble-style-name">像素风格</div>
+                </div>
+              </div>
+            </div>
+            <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:10px;padding-left:60px;padding-right:16px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <div class="setting-label">消息字体大小</div>
+                  <div class="setting-desc">调节聊天消息正文字号</div>
+                </div>
+                <div class="slider-value-input">
+                  <input type="number" id="fontSizeInput" value="15" min="5" max="20" step="0.5" style="width:52px;">
+                  <span style="color:var(--text-tertiary);font-size:12px;">px</span>
+                </div>
+              </div>
+              <input type="range" class="slider" id="fontSizeSlider" min="5" max="20" step="0.5" value="15">
+            </div>
+            <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:10px;padding-left:60px;padding-right:16px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <div class="setting-label">气泡尺寸</div>
+                  <div class="setting-desc">调节气泡内边距，改变气泡大小</div>
+                </div>
+                <div class="slider-value-text" id="bubbleSizeLabel">标准</div>
+              </div>
+              <input type="range" class="slider" id="bubbleSizeSlider" min="0" max="2" step="1" value="1">
+            </div>
+            <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:10px;padding-left:60px;padding-right:16px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <div class="setting-label">头像大小</div>
+                  <div class="setting-desc">调节聊天头像显示尺寸</div>
+                </div>
+                <div class="slider-value-input">
+                  <input type="number" id="avatarSizeInput" value="42" min="28" max="60" step="1" style="width:52px;">
+                  <span style="color:var(--text-tertiary);font-size:12px;">px</span>
+                </div>
+              </div>
+              <input type="range" class="slider" id="avatarSizeSlider" min="28" max="60" step="1" value="42">
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">显示头像</div>
+                <div class="setting-desc">关闭后聊天消息不显示头像</div>
+              </div>
+              <div class="toggle active" id="showMsgAvatarToggle"></div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">显示名称</div>
+                <div class="setting-desc">关闭后群聊气泡上方不显示发送者名称</div>
+              </div>
+              <div class="toggle active" id="showMsgSenderNameToggle"></div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">时间戳显示</div>
+                <div class="setting-desc">点击消息出现时间戳，日常默认隐藏</div>
+              </div>
+              <select class="input" id="msgTimeModeSelect" style="width:125px;padding:4px 6px;font-size:12px;">
+                <option value="tap">点击消息显示</option>
+                <option value="auto">自动显示</option>
+                <option value="off">不显示</option>
+              </select>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">已读显示</div>
+                <div class="setting-desc">在最后一条己方消息下显示已读状态</div>
+              </div>
+              <div class="toggle active" id="showReadStatusToggle"></div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">已读文案</div>
+                <div class="setting-desc">自定义"已读"显示文字样式</div>
+              </div>
+              <input type="text" class="input" id="readTextInput" style="width:110px;padding:4px 6px;font-size:12px;" value="已读">
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">已读不回文案</div>
+                <div class="setting-desc">自定义"已读不回"显示文字样式</div>
+              </div>
+              <input type="text" class="input" id="readNoReplyTextInput" style="width:110px;padding:4px 6px;font-size:12px;" value="已读，对方不想回">
+            </div>
+            <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:8px;padding-left:60px;">
+              <div>
+                <div class="setting-label">自定义字体</div>
+                <div class="setting-desc">填写 font-family 与字体CSS链接（@import 引入），留空恢复默认字体</div>
+              </div>
+              <input type="text" class="input" id="customFontFamilyInput" placeholder="font-family，如 'PingFang SC', 'Microsoft YaHei', sans-serif" style="font-size:12px;">
+              <input type="text" class="input" id="customFontUrlInput" placeholder="字体CSS链接，如 https://fonts.googleapis.com/css2?..." style="font-size:12px;">
+              <button class="btn btn-secondary" id="applyCustomFontBtn" style="align-self:flex-end;padding:6px 14px;font-size:12px;"><i class="fas fa-check"></i> 应用</button>
+            </div>
+            <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:12px;padding-left:60px;padding-right:16px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <div class="setting-label">聊天背景</div>
+                  <div class="setting-desc">自定义聊天界面背景</div>
+                </div>
+                <button class="btn btn-sm" id="resetChatBgBtn" style="padding:4px 12px;font-size:12px;display:none;">
+                  <i class="fas fa-undo"></i> 重置
+                </button>
+              </div>
+              
+              <!-- 按联系人独立设置开关 -->
+              <div class="setting-item" style="padding:2px 0;border-radius:var(--radius-md);background:var(--bg-tertiary);">
+                <div class="setting-content" style="padding-left:12px;">
+                  <div class="setting-label" style="font-size:13px;">按联系人独立设置</div>
+                  <div class="setting-desc" id="chatBgPerConvDesc">关闭时修改全局背景（所有会话共用）</div>
+                </div>
+                <div class="toggle" id="chatBgPerConvToggle"></div>
+              </div>
+              
+              <!-- 预设背景 -->
+              <div>
+                <div class="bg-sub-label">预设背景</div>
+                <div class="bg-presets" id="bgPresets">
+                  <div class="bg-preset-item" data-preset="none" style="background:var(--bg-primary);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="blue-sky" style="background:linear-gradient(180deg, #e0f2fe 0%, #bae6fd 50%, #7dd3fc 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="purple-dream" style="background:linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 50%, #c4b5fd 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="mint-fresh" style="background:linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="warm-sunset" style="background:linear-gradient(135deg, #fef3c7 0%, #fde68a 50%, #fcd34d 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="sakura" style="background:linear-gradient(180deg, #fce7f3 0%, #fbcfe8 50%, #f9a8d4 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="ocean-deep" style="background:linear-gradient(180deg, #0c4a6e 0%, #075985 50%, #0369a1 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="night-star" style="background:linear-gradient(180deg, #1e1b4b 0%, #312e81 50%, #3730a3 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="paper" style="background:linear-gradient(135deg, #faf8f5 0%, #f5f0e8 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="forest" style="background:linear-gradient(180deg, #dcfce7 0%, #bbf7d0 50%, #86efac 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 自定义上传 -->
+              <div>
+                <div class="bg-sub-label">自定义图片</div>
+                <div class="bg-upload-area" id="bgUploadArea">
+                  <div class="bg-upload-preview" id="bgUploadPreview">
+                    <i class="fas fa-image bg-upload-icon"></i>
+                    <div class="bg-upload-text">点击上传图片</div>
+                    <div class="bg-upload-hint">支持 JPG / PNG / WEBP · 自动压缩</div>
+                  </div>
+                  <input type="file" id="chatBgInput" accept="image/*" style="display:none;">
+                </div>
+              </div>
+              
+              <!-- 背景浓度 -->
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;width:56px;">背景浓度</span>
+                <input type="range" class="slider" id="chatBgOpacity" min="0" max="100" step="5" value="20" style="flex:1;">
+                <span style="font-size:12px;color:var(--primary);font-weight:600;width:36px;text-align:right;" id="chatBgOpacityVal">20%</span>
+              </div>
+              
+              <!-- 背景模糊 -->
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;width:56px;">背景模糊</span>
+                <input type="range" class="slider" id="chatBgBlur" min="0" max="20" step="1" value="0" style="flex:1;">
+                <span style="font-size:12px;color:var(--primary);font-weight:600;width:36px;text-align:right;" id="chatBgBlurVal">0px</span>
+              </div>
+              
+              <!-- 背景模式 -->
+              <div>
+                <div class="bg-sub-label">填充方式</div>
+                <div class="bg-mode-selector" id="bgModeSelector">
+                  <div class="bg-mode-btn" data-mode="cover">填充</div>
+                  <div class="bg-mode-btn" data-mode="contain">适应</div>
+                  <div class="bg-mode-btn" data-mode="repeat">平铺</div>
+                  <div class="bg-mode-btn" data-mode="auto">居中</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 对话参数 -->
+        <div class="collapsible" id="chatCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-comments"></i></div>
+            <div class="collapsible-title">对话参数配置</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body">
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">回复延迟区间（秒）</div>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input type="number" class="input" id="replyDelayMin" style="width:50px;padding:4px 6px;font-size:12px;" value="1" min="0">
+                <span style="color:var(--text-secondary);">~</span>
+                <input type="number" class="input" id="replyDelayMax" style="width:50px;padding:4px 6px;font-size:12px;" value="3" min="1">
+              </div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">回复消息条数</div>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input type="number" class="input" id="replyCountMin" style="width:50px;padding:4px 6px;font-size:12px;" value="1" min="1">
+                <span style="color:var(--text-secondary);">~</span>
+                <input type="number" class="input" id="replyCountMax" style="width:50px;padding:4px 6px;font-size:12px;" value="3" min="1">
+              </div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">每条消息词条数量</div>
+              </div>
+              <input type="number" class="input" id="wordsPerMessage" style="width:60px;padding:4px 6px;font-size:12px;" value="1" min="1">
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">支持引用回复</div>
+                <div class="setting-desc">回复时可能引用你的消息</div>
+              </div>
+              <div class="toggle active" id="quoteReplyToggle"></div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">已读不回</div>
+                <div class="setting-desc" id="readNoReplyDesc">对方可能已读但不回复（按联系人独立记录）</div>
+              </div>
+              <div class="toggle" id="readNoReplyToggle"></div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">已读不回概率（%）</div>
+                <div class="setting-desc" id="readNoReplyChanceDesc">0~100，按会话独立，默认 50</div>
+              </div>
+              <input type="number" class="input" id="readNoReplyChance" style="width:60px;padding:4px 6px;font-size:12px;" value="50" min="0" max="100">
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">连句模式</div>
+                <div class="setting-desc">多条回复合并为一条发出，用随机符号分隔</div>
+              </div>
+              <div class="toggle" id="multiSentenceToggle"></div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">连句分隔符池</div>
+                <div class="setting-desc">每个字符都可能被随机选用作分隔</div>
+              </div>
+              <input type="text" class="input" id="multiSentenceSeps" style="width:110px;padding:4px 6px;font-size:12px;" value="，。~！">
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">正在输入文案</div>
+                <div class="setting-desc">自定义"正在输入"提示文字，留空仅显示圆点</div>
+              </div>
+              <input type="text" class="input" id="typingTextInput" placeholder="对方正在输入…" style="width:130px;padding:4px 6px;font-size:12px;">
+            </div>
+          </div>
+        </div>
+        
+        <!-- 定时主动消息 -->
+        <div class="collapsible" id="timedMsgCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-clock"></i></div>
+            <div class="collapsible-title">定时主动消息</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body">
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">定时消息总开关</div>
+                <div class="setting-desc">开启后当前会话对方定时发言</div>
+              </div>
+              <div class="toggle" id="timedMsgToggle"></div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">主动发言时限（分钟）</div>
+                <div class="setting-desc" id="timedMsgDesc">在设定分钟数内随机时机主动发言，范围 1 ~ 180</div>
+              </div>
+              <input type="number" class="input" id="timedMsgInterval" style="width:60px;padding:4px 6px;font-size:12px;" value="30" min="1" max="180">
+            </div>
+          </div>
+        </div>
+        
+        <!-- 调查问卷 -->
+        <div class="collapsible" id="surveyCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-clipboard-list"></i></div>
+            <div class="collapsible-title">调查问卷</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body">
+            <div style="padding:8px 12px;">
+              <div class="survey-section-label" style="margin-top:4px;">我方问卷编辑器</div>
+              <div class="setting-label" style="margin-bottom:6px;">问卷标题</div>
+              <input type="text" class="input" id="surveyTitleInput" placeholder="输入问卷标题" style="width:100%;margin-bottom:10px;">
+              <div id="surveyEditorList"></div>
+              <button class="survey-add-btn" onclick="addSurveyQuestion()"><i class="fas fa-plus"></i> 添加问题</button>
+              
+              <div class="survey-section-label">我方问卷库</div>
+              <div class="setting-desc" style="margin-bottom:8px;">我方创建的问卷合集，可保存多份随时发起</div>
+              <div class="survey-lib-search">
+                <i class="fas fa-search"></i>
+                <input type="text" id="mySurveyLibSearch" placeholder="搜索我方问卷库" oninput="renderMySurveyLibrary()">
+              </div>
+              <div id="mySurveyLibList" class="survey-lib-list"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                <button class="survey-add-btn" style="padding:7px 14px;" onclick="addMySurveyFromEditor()"><i class="fas fa-copy"></i> 从编辑器存入</button>
+                <button class="survey-add-btn" style="padding:7px 14px;" onclick="openMySurveyLibEditor()"><i class="fas fa-plus"></i> 新建我方问卷</button>
+                <button class="survey-add-btn" style="padding:7px 14px;" onclick="openMySurveyPicker()"><i class="fas fa-paper-plane"></i> 从库中选择发送</button>
+              </div>
+              
+              <div class="survey-section-label">对方问卷库</div>
+              <div class="setting-desc" style="margin-bottom:8px;">对方"拥有"的问卷，发送时可自主选择其中一份</div>
+              <div class="survey-lib-search">
+                <i class="fas fa-search"></i>
+                <input type="text" id="surveyLibSearch" placeholder="搜索问卷库" oninput="renderSurveyLibrary()">
+              </div>
+              <div id="surveyLibList" class="survey-lib-list"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+                <button class="survey-add-btn" style="padding:7px 14px;" onclick="addSurveyLibFromEditor()"><i class="fas fa-copy"></i> 从编辑器存入</button>
+                <button class="survey-add-btn" style="padding:7px 14px;" onclick="openSurveyLibEditor()"><i class="fas fa-plus"></i> 新建对方问卷</button>
+                <button class="survey-add-btn" style="padding:7px 14px;" onclick="showSurveyPresetPicker()"><i class="fas fa-box-open"></i> 导入预设</button>
+              </div>
+              
+              <div class="survey-section-label">对方作答</div>
+              <div class="setting-item">
+                <div class="setting-content">
+                  <div class="setting-label">作答延迟（秒）</div>
+                  <div class="setting-desc">对方收到问卷后在此时间范围内随机作答</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;padding-right:12px;">
+                  <input type="number" class="input" style="width:56px;text-align:center;" min="1" max="3600" id="surveyAnsMinInput" onchange="setSurveyAnswerCfg()"> ~
+                  <input type="number" class="input" style="width:56px;text-align:center;" min="1" max="3600" id="surveyAnsMaxInput" onchange="setSurveyAnswerCfg()">
+                </div>
+              </div>
+              <div class="setting-item">
+                <div class="setting-content">
+                  <div class="setting-label">作答时限（秒）</div>
+                  <div class="setting-desc">超过时限对方仍未作答，问卷标记为已过期（0 = 不限时）</div>
+                </div>
+                <div style="display:flex;align-items:center;gap:4px;padding-right:12px;">
+                  <input type="number" class="input" style="width:64px;text-align:center;" min="0" max="86400" id="surveyAnsExpireInput" onchange="setSurveyAnswerCfg()">
+                </div>
+              </div>
+
+              <div class="survey-section-label">对方主动发送</div>
+              <div class="setting-item">
+                <div class="setting-content">
+                  <div class="setting-label">主动发问卷开关</div>
+                  <div class="setting-desc" id="surveyAutoDesc">开启后对方会在完全随机的时机主动发问卷，时机不受我方控制（按会话独立）</div>
+                </div>
+                <div class="toggle" id="surveyAutoToggle"></div>
+              </div>
+              <button class="survey-add-btn" style="width:100%;padding:8px;margin-top:2px;" onclick="sendSurveyFromContact('random')"><i class="fas fa-bolt"></i> 立即让TA主动发一份</button>
+            </div>
+            <div style="padding:8px 12px;display:flex;gap:8px;flex-wrap:wrap;">
+              <button class="btn btn-primary" style="padding:8px 12px;font-size:13px;flex:1;" onclick="sendSurveyToContact()"><i class="fas fa-paper-plane"></i> 发送编辑器问卷</button>
+              <button class="btn btn-secondary" style="padding:8px 12px;font-size:13px;flex:1;" onclick="openMySurveyPicker()"><i class="fas fa-clipboard-list"></i> 从我方库选发</button>
+              <button class="btn btn-secondary" style="padding:8px 12px;font-size:13px;flex:1;" onclick="openSurveyFromContactPicker()"><i class="fas fa-inbox"></i> 让对方选择发送</button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 信件参数 -->
+        <div class="collapsible" id="letterCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-envelope"></i></div>
+            <div class="collapsible-title">信件参数</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body">
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">回信延迟小时范围</div>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input type="number" class="input" id="letterDelayMin" style="width:50px;padding:4px 6px;font-size:12px;" value="1" min="0">
+                <span style="color:var(--text-secondary);">~</span>
+                <input type="number" class="input" id="letterDelayMax" style="width:50px;padding:4px 6px;font-size:12px;" value="24" min="1">
+              </div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">回信字卡数量</div>
+                <div class="setting-desc">随机范围，每次回信在区间内随机</div>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input type="number" class="input" id="letterWordCountMin" style="width:50px;padding:4px 6px;font-size:12px;" value="3" min="1">
+                <span style="color:var(--text-secondary);">~</span>
+                <input type="number" class="input" id="letterWordCountMax" style="width:50px;padding:4px 6px;font-size:12px;" value="5" min="1">
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 联系人状态 -->
+        <div class="collapsible" id="statusCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-heart"></i></div>
+            <div class="collapsible-title">联系人状态</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body">
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">状态切换间隔（分钟）</div>
+              </div>
+              <input type="number" class="input" id="statusInterval" style="width:60px;padding:4px 6px;font-size:12px;" value="30" min="1">
+            </div>
+            <div class="setting-item" onclick="openStatusWordsModal()">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">状态词库管理</div>
+                <div class="setting-desc">编辑随机状态词库</div>
+              </div>
+              <i class="fas fa-chevron-right setting-arrow"></i>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 通话设置 -->
+        <div class="collapsible" id="callCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-phone"></i></div>
+            <div class="collapsible-title">通话设置</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body">
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">自动来电</div>
+                <div class="setting-desc">随机自动来电</div>
+              </div>
+              <div class="toggle" id="autoCallToggle"></div>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">免打扰时段</div>
+                <div class="setting-desc" id="dndText">未设置</div>
+              </div>
+              <i class="fas fa-chevron-right setting-arrow" onclick="openDNDSetting(event)"></i>
+            </div>
+            <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:12px;padding-left:60px;padding-right:16px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <div>
+                  <div class="setting-label">通话背景图</div>
+                  <div class="setting-desc">自定义通话窗口背景</div>
+                </div>
+                <button class="btn btn-sm" id="resetCallBgBtn" style="padding:4px 12px;font-size:12px;display:none;">
+                  <i class="fas fa-undo"></i> 重置
+                </button>
+              </div>
+              
+              <!-- 按联系人独立设置开关 -->
+              <div class="setting-item" style="padding:2px 0;border-radius:var(--radius-md);background:var(--bg-tertiary);">
+                <div class="setting-content" style="padding-left:12px;">
+                  <div class="setting-label" style="font-size:13px;">按联系人独立设置</div>
+                  <div class="setting-desc" id="callBgPerConvDesc">关闭时修改全局通话背景（所有联系人共用）</div>
+                </div>
+                <div class="toggle" id="callBgPerConvToggle"></div>
+              </div>
+              
+              <!-- 预设通话背景 -->
+              <div>
+                <div class="bg-sub-label">预设背景</div>
+                <div class="bg-presets" id="callBgPresets">
+                  <div class="bg-preset-item" data-preset="none" style="background:#1a2336;">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="blue-sky" style="background:linear-gradient(180deg, #e0f2fe 0%, #bae6fd 50%, #7dd3fc 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="purple-dream" style="background:linear-gradient(135deg, #f3e8ff 0%, #e9d5ff 50%, #c4b5fd 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="mint-fresh" style="background:linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="warm-sunset" style="background:linear-gradient(135deg, #fef3c7 0%, #fde68a 50%, #fcd34d 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="sakura" style="background:linear-gradient(180deg, #fce7f3 0%, #fbcfe8 50%, #f9a8d4 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="ocean-deep" style="background:linear-gradient(180deg, #0c4a6e 0%, #075985 50%, #0369a1 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                  <div class="bg-preset-item" data-preset="night-star" style="background:linear-gradient(180deg, #1e1b4b 0%, #312e81 50%, #3730a3 100%);">
+                    <span class="preset-check"><i class="fas fa-check"></i></span>
+                  </div>
+                </div>
+              </div>
+              
+              <!-- 自定义上传 -->
+              <div>
+                <div class="bg-sub-label">自定义图片</div>
+                <div class="bg-upload-area" id="callBgUploadArea">
+                  <div class="bg-upload-preview" id="callBgUploadPreview">
+                    <i class="fas fa-image bg-upload-icon"></i>
+                    <div class="bg-upload-text">点击上传通话背景图</div>
+                    <div class="bg-upload-hint">支持 JPG / PNG / WEBP · 自动压缩</div>
+                  </div>
+                  <input type="file" id="callBgInput" accept="image/*" style="display:none;">
+                </div>
+              </div>
+              
+              <!-- 遮罩浓度 -->
+              <div style="display:flex;align-items:center;gap:8px;">
+                <span style="font-size:12px;color:var(--text-secondary);white-space:nowrap;width:56px;">遮罩浓度</span>
+                <input type="range" class="slider" id="callBgOverlaySlider" min="0" max="100" step="5" value="45" style="flex:1;">
+                <span style="font-size:12px;color:var(--primary);font-weight:600;width:36px;text-align:right;" id="callBgOverlayVal">45%</span>
+              </div>
+              <div class="setting-desc" style="font-size:11px;">遮罩用于保证头像和文字在背景图上清晰可读</div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 通知设置 -->
+        <div class="collapsible" id="notifyCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-bell"></i></div>
+            <div class="collapsible-title">通知设置</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body">
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">桌面通知</div>
+                <div class="setting-desc">新消息时显示桌面通知</div>
+              </div>
+              <div class="toggle" id="desktopNotifyToggle"></div>
+            </div>
+            <div class="setting-item" onclick="testDesktopNotification()">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">发一条测试通知</div>
+                <div class="setting-desc">点一下，看看能不能弹出来</div>
+              </div>
+              <i class="fas fa-paper-plane" style="color:var(--text-tertiary);"></i>
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">后台保活</div>
+                <div class="setting-desc">保持页面后台运行</div>
+              </div>
+              <div class="toggle active" id="keepAliveToggle"></div>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 词条库 -->
+        <div class="collapsible" id="wordsCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-book"></i></div>
+            <div class="collapsible-title">词条库管理</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body">
+            <!-- 按联系人独立词库开关 -->
+            <div style="padding:10px 12px 2px;">
+              <div class="setting-item" style="padding:8px 12px;border-radius:var(--radius-md);background:var(--bg-tertiary);border:1px solid var(--border-color);">
+                <div class="setting-content" style="padding-left:0;">
+                  <div class="setting-label" style="font-size:13px;">按联系人独立词库</div>
+                  <div class="setting-desc" id="convWordsDesc">当前：全局词库</div>
+                </div>
+                <div class="toggle" id="convWordsToggle"></div>
+              </div>
+              <div class="setting-desc" style="font-size:11px;padding:6px 2px 0;">开启后，此联系人的回复与回信只从 TA 的专属词库中抽取，不影响其他联系人</div>
+            </div>
+            <div class="word-category-list" id="wordCategoryList"></div>
+            <div style="padding:8px 12px;display:flex;gap:8px;">
+              <input type="text" class="input" id="newWordInput" placeholder="输入新词条" style="flex:1;">
+              <button class="btn btn-primary" style="padding:8px 12px;font-size:13px;" onclick="addWord()">添加</button>
+            </div>
+            <!-- 搜索 / 排序 / 批量管理工具条 -->
+            <div style="padding:0 12px 8px;display:flex;gap:8px;align-items:center;">
+              <input type="text" class="input" id="wordSearchInput" placeholder="搜索当前分类" style="flex:1;padding:7px 10px;font-size:12px;" oninput="wordSearchQuery=this.value;renderWordList()">
+              <select class="input" id="wordSortSelect" style="width:82px;padding:7px 4px;font-size:12px;flex-shrink:0;" onchange="wordSortMode=this.value;renderWordList()">
+                <option value="default">默认</option>
+                <option value="asc">升序</option>
+                <option value="desc">降序</option>
+              </select>
+              <button class="btn btn-secondary" id="wordManageBtn" style="padding:7px 10px;font-size:12px;flex-shrink:0;" onclick="toggleWordManageMode()">管理</button>
+            </div>
+            <!-- 批量管理操作条 -->
+            <div id="wordManageBar" style="display:none;padding:0 12px 8px;gap:6px;align-items:center;flex-wrap:wrap;">
+              <button class="btn btn-secondary" style="padding:6px 10px;font-size:12px;" onclick="wordSelectAll()">全选</button>
+              <button class="btn btn-secondary" style="padding:6px 10px;font-size:12px;" onclick="openMoveWordsModal()">移动到</button>
+              <button class="btn btn-danger" style="padding:6px 10px;font-size:12px;" onclick="batchDeleteWords()">删除</button>
+              <button class="btn btn-secondary" style="padding:6px 10px;font-size:12px;" onclick="toggleWordManageMode()">取消</button>
+              <span id="wordManageCount" style="font-size:11px;color:var(--text-tertiary);margin-left:auto;"></span>
+            </div>
+            <div class="word-list" id="wordList"></div>
+            <div style="padding:12px;display:flex;gap:8px;">
+              <button class="btn btn-secondary" style="flex:1;padding:8px;font-size:12px;" onclick="openImportWordsModal()">
+                <i class="fas fa-file-import"></i> 导入
+              </button>
+              <button class="btn btn-secondary" style="flex:1;padding:8px;font-size:12px;" onclick="exportWords()">
+                <i class="fas fa-file-export"></i> JSON
+              </button>
+              <button class="btn btn-secondary" style="flex:1;padding:8px;font-size:12px;" onclick="exportWordsTxt()">
+                <i class="fas fa-file-alt"></i> TXT
+              </button>
+              <button class="btn btn-danger" style="flex:1;padding:8px;font-size:12px;" onclick="clearWords()">
+                <i class="fas fa-trash"></i> 清空
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 表情管理 -->
+        <div class="collapsible" id="emojiCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-smile"></i></div>
+            <div class="collapsible-title">表情管理</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body">
+            <div style="padding:8px 12px;display:flex;gap:8px;">
+              <button class="btn btn-secondary" style="flex:1;padding:8px;font-size:12px;" onclick="openAddMyEmojiModal()">
+                <i class="fas fa-plus"></i> 添加我的表情
+              </button>
+              <button class="btn btn-secondary" style="flex:1;padding:8px;font-size:12px;" onclick="openAddOtherEmojiModal()">
+                <i class="fas fa-plus"></i> 添加对方表情
+              </button>
+            </div>
+            <div class="section-title">我的表情库</div>
+            <div class="emoji-grid" id="myEmojiList" style="padding:8px 12px;"></div>
+            <div class="section-title">对方表情库</div>
+            <div class="emoji-grid" id="otherEmojiList" style="padding:8px 12px;"></div>
+            <div style="padding:12px;display:flex;gap:8px;">
+              <button class="btn btn-danger" style="flex:1;padding:8px;font-size:12px;" onclick="clearMyEmojis()">
+                <i class="fas fa-trash"></i> 清空我的
+              </button>
+              <button class="btn btn-danger" style="flex:1;padding:8px;font-size:12px;" onclick="clearOtherEmojis()">
+                <i class="fas fa-trash"></i> 清空对方
+              </button>
+            </div>
+          </div>
+        </div>
+        
+        <!-- 数据备份 -->
+        <!-- 钱包 -->
+        <div class="collapsible" id="walletCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-wallet"></i></div>
+            <div class="collapsible-title">钱包</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body" id="walletPanelBody"></div>
+        </div>
+
+        <!-- 铃声与音效 -->
+        <div class="collapsible" id="soundCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-music"></i></div>
+            <div class="collapsible-title">铃声与音效</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body" id="soundPanelBody"></div>
+        </div>
+
+        <!-- 记事本&待办 -->
+        <div class="collapsible" id="notesCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-pen-to-square"></i></div>
+            <div class="collapsible-title">记事本&待办</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body" id="notesPanelBody"></div>
+        </div>
+
+        <!-- 收藏夹 -->
+        <div class="collapsible" id="favoritesCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-star"></i></div>
+            <div class="collapsible-title">收藏夹</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body" id="favoritesPanelBody"></div>
+        </div>
+
+        <!-- 高级工具 -->
+        <div class="collapsible" id="advToolsCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-screwdriver-wrench"></i></div>
+            <div class="collapsible-title">高级工具</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body" id="advToolsPanelBody"></div>
+        </div>
+
+        <div class="collapsible" id="backupCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-database"></i></div>
+            <div class="collapsible-title">数据备份</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body">
+            <div class="setting-item" onclick="exportAllData()">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">导出全部数据</div>
+                <div class="setting-desc">导出JSON备份文件</div>
+              </div>
+              <i class="fas fa-download" style="color:var(--text-tertiary);"></i>
+            </div>
+            <div class="setting-item" onclick="document.getElementById('importFile').click()">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">导入备份数据</div>
+                <div class="setting-desc">从JSON文件恢复数据</div>
+              </div>
+              <i class="fas fa-upload" style="color:var(--text-tertiary);"></i>
+            </div>
+            <input type="file" id="importFile" accept=".json" style="display:none;" onchange="importAllData(event)">
+            <div class="setting-item danger" onclick="clearAllDataConfirm()">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label" style="color:var(--danger);">清空全部数据</div>
+                <div class="setting-desc">删除所有数据，不可恢复</div>
+              </div>
+              <i class="fas fa-trash" style="color:var(--danger);"></i>
+            </div>
+          </div>
+        </div>
+        
+        <div style="height:20px;"></div>
+      </div>
+    </div>
+  </div>
+  
+  <!-- 底部Tab栏 -->
+  <div class="tabbar">
+    <div class="tab-item active" data-page="chat">
+      <i class="fas fa-comment-dots"></i>
+      <span>聊天</span>
+    </div>
+    <div class="tab-item" data-page="contacts">
+      <i class="fas fa-address-book"></i>
+      <span>通讯录</span>
+    </div>
+    <div class="tab-item" data-page="moments" id="momentsTabItem">
+      <i class="fas fa-camera"></i>
+      <span>朋友圈</span>
+      <span class="tab-badge" id="momentsBadge" style="display:none;">0</span>
+    </div>
+    <div class="tab-item" data-page="letters">
+      <i class="fas fa-envelope"></i>
+      <span>信件</span>
+    </div>
+    <div class="tab-item" data-page="settings">
+      <i class="fas fa-cog"></i>
+      <span>设置</span>
+    </div>
+  </div>
+</div>
+
+<!-- 模态弹窗容器 -->
+<div id="modalContainer"></div>
+
+<!-- 会话右键操作菜单 -->
+<div class="conv-context-menu" id="convContextMenu"></div>
+
+<!-- 通话弹窗 -->
+<div class="call-modal" id="callModal">
+  <div class="call-bg" id="callBgLayer"></div>
+  <div class="call-bg-overlay"></div>
+  <button class="call-action-btn minimize" onclick="minimizeCall()"><i class="fas fa-minus"></i></button>
+  <div class="call-avatar" id="callAvatar">A</div>
+  <div class="call-avatars-grid" id="callAvatarsGrid" style="display:none;"></div>
+  <div class="call-members-count" id="callMembersCount" style="display:none;"></div>
+  <div class="call-name" id="callName">联系人</div>
+  <div class="call-status" id="callStatus">正在呼叫...</div>
+  <div class="call-timer" id="callTimer" style="display:none;">00:00</div>
+  <div class="call-actions">
+    <button class="call-action-btn mute" id="callMuteBtn" onclick="toggleMute()"><i class="fas fa-microphone"></i></button>
+    <button class="call-action-btn hangup" onclick="hangUp()"><i class="fas fa-phone-slash"></i></button>
+    <button class="call-action-btn accept" id="callAcceptBtn" onclick="acceptCall()"><i class="fas fa-phone"></i></button>
+  </div>
+</div>
+
+<!-- 悬浮通话窗口 -->
+<div class="floating-call" id="floatingCall" onclick="onFloatingCallClick()">
+  <div class="drag-handle" id="callDragHandle" title="拖拽移动"><i class="fas fa-grip-vertical"></i></div>
+  <div class="call-avatar-sm" id="floatingCallAvatar">A</div>
+  <div class="call-info">
+    <div class="call-info-name" id="floatingCallName">通话中</div>
+    <div class="call-info-time" id="floatingCallTime">00:00</div>
+  </div>
+  <div class="hangup-btn" onclick="event.stopPropagation();hangUp();"><i class="fas fa-phone-slash"></i></div>
+</div>
+
+<!-- 消息长按/右键菜单 -->
+<div class="msg-context-menu" id="msgContextMenu">
+  <div class="menu-item" onclick="quoteMessageFromMenu()"><i class="fas fa-quote-left"></i> 引用</div>
+  <div class="menu-item" id="menuCopyTextItem" style="display:none;" onclick="copyTextFromMenu()"><i class="fas fa-copy"></i> 复制文本</div>
+  <div class="menu-item" onclick="addReactionFromMenu()"><i class="fas fa-face-smile"></i> 表情回应</div>
+  <div class="menu-item" id="menuRecallItem" style="display:none;" onclick="recallMessageFromMenu()"><i class="fas fa-rotate-left"></i> 撤回</div>
+  <div class="menu-item" onclick="forwardMessageFromMenu()"><i class="fas fa-share"></i> 转发</div>
+  <div class="menu-item" onclick="startMultiSelectMode()"><i class="fas fa-check-double"></i> 多选</div>
+  <div class="menu-item" onclick="favoriteMessageFromMenu()"><i class="fas fa-star"></i> 收藏</div>
+  <div class="menu-item" id="menuSaveImgItem" style="display:none;" onclick="saveImageFromMenu()"><i class="fas fa-download"></i> 保存图片</div>
+  <div class="menu-item" id="menuSaveWordItem" style="display:none;" onclick="saveWordFromMenu()"><i class="fas fa-book"></i> 存入字卡库</div>
+  <div class="menu-item" style="color:var(--danger);" onclick="deleteMessageFromMenu()"><i class="fas fa-trash"></i> 删除</div>
+</div>
+
+<!-- 图片预览 -->
+<div class="image-preview" id="imagePreview" onclick="closeImagePreview()">
+  <div class="close-btn"><i class="fas fa-times"></i></div>
+  <img id="previewImage" src="" alt="">
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+
+<script src="app.js"></script>
+</body>
+</html>
