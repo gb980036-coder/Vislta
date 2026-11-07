@@ -2925,6 +2925,7 @@ function addMessageTo(chatType, chatId, msg) {
   if (isSelf(msg.sender) && !msg._noSound) playSendSound();
   
   // 桌面通知
+  if (!isSelf(msg.sender) && isViewing) { ntfDbg('通知: 你正看着这个会话，按设置不弹'); }
   if (!isSelf(msg.sender) && !isViewing) {
     let notifyName = '新消息';
     if (chatType === 'group') {
@@ -6898,24 +6899,35 @@ function requestNotificationPermission() {
   });
 }
 
+function ntfDbg(t){try{var d=document.getElementById('ntfDbg');if(!d){d=document.createElement('div');d.id='ntfDbg';d.style.cssText='position:fixed;left:8px;bottom:8px;z-index:999999;background:rgba(0,0,0,.85);color:#7CFC00;font:12px monospace;padding:6px 8px;border-radius:6px;max-width:92vw;white-space:pre-wrap;pointer-events:none;line-height:1.4';document.body.appendChild(d);}d.textContent=t;}catch(e){}}
 function showNotification(title, body, options) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  var opt = { body: body || '', tag: ((options && options.tag) || 'chat-app') + '-' + Date.now(), renotify: true, silent: false, data: { url: location.href } };
-  var getting = ('serviceWorker' in navigator) ? navigator.serviceWorker.getRegistration() : Promise.resolve(null);
-  Promise.resolve(getting).then(function (r) {
-    if (r && r.showNotification) return r.showNotification(title, opt);
-    throw new Error('no sw');
-  }).catch(function () {
-    try {
-      var n = new Notification(title, opt);
-      n.onclick = function () {
-        try { window.focus(); } catch (e) {}
-        if (options && typeof options.onClick === 'function') options.onClick();
-        n.close();
-      };
-      setTimeout(function () { n.close(); }, 6000);
-    } catch (e) {}
-  });
+  try {
+    if (!('Notification' in window)) { ntfDbg('通知: 浏览器没有Notification'); return; }
+    if (Notification.permission !== 'granted') { ntfDbg('通知: 权限=' + Notification.permission); return; }
+    var opt = { body: body || '', tag: ((options && options.tag) || 'chat-app') + '-' + Date.now(), renotify: true, silent: false, data: { url: location.href } };
+    ntfDbg('通知: 开始发 ' + title);
+    var getting = ('serviceWorker' in navigator) ? navigator.serviceWorker.getRegistration() : Promise.resolve(null);
+    Promise.resolve(getting).then(function (r) {
+      if (r && r.showNotification) {
+        return r.showNotification(title, opt).then(function () { ntfDbg('通知: SW已发 ' + title); });
+      }
+      throw new Error('no sw');
+    }).catch(function (e1) {
+      ntfDbg('通知: SW没成(' + (e1 && e1.message) + ')，改直发');
+      try {
+        var n = new Notification(title, opt);
+        ntfDbg('通知: 直发已发 ' + title);
+        n.onclick = function () {
+          try { window.focus(); } catch (e) {}
+          if (options && typeof options.onClick === 'function') options.onClick();
+          n.close();
+        };
+        setTimeout(function () { n.close(); }, 6000);
+      } catch (e2) {
+        ntfDbg('通知: 两条路都断 ' + (e2 && e2.message));
+      }
+    });
+  } catch (e) { ntfDbg('通知: 异常 ' + e.message); }
 }
 
 function testDesktopNotification() {
