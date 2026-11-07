@@ -2925,8 +2925,8 @@ function addMessageTo(chatType, chatId, msg) {
   if (isSelf(msg.sender) && !msg._noSound) playSendSound();
   
   // 桌面通知
-  if (!isSelf(msg.sender) && isViewing) { ntfDbg('通知: 你正看着这个会话，按设置不弹'); }
-  if (!isSelf(msg.sender) && !isViewing) {
+  if (!isSelf(msg.sender) && isViewing) { ntfDbg('通知: 你正看着这个会话，照样弹'); }
+  if (!isSelf(msg.sender)) {
     let notifyName = '新消息';
     if (chatType === 'group') {
       const g = appData.groups.find(x => x.id === chatId);
