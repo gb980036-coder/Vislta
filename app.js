@@ -67,7 +67,7 @@ const defaultAppData = {
     dndEnabled: false,
     dndStart: '22:00',
     dndEnd: '08:00',
-    desktopNotify: false,
+    desktopNotify: true,
     keepAlive: true,
     timedMsgEnabled: false,
     timedMsgInterval: 30,
@@ -1386,7 +1386,7 @@ function initToggles() {
     appData.settings.desktopNotify = !appData.settings.desktopNotify;
     this.classList.toggle('active', appData.settings.desktopNotify);
     saveData();
-    if (appData.settings.desktopNotify) {
+    if (true) {
       requestNotificationPermission();
     }
   });
@@ -2925,7 +2925,7 @@ function addMessageTo(chatType, chatId, msg) {
   if (isSelf(msg.sender) && !msg._noSound) playSendSound();
   
   // 桌面通知
-  if (appData.settings.desktopNotify && !isSelf(msg.sender) && !isViewing) {
+  if (!isSelf(msg.sender) && !isViewing) {
     let notifyName = '新消息';
     if (chatType === 'group') {
       const g = appData.groups.find(x => x.id === chatId);
@@ -5292,7 +5292,7 @@ function generateLetterReply(letterId) {
   saveData();
   renderLetters();
   
-  if (appData.settings.desktopNotify) {
+  if (true) {
     showNotification('收到回信', `来自${letter.recipient}的回信`, {
       tag: 'letter-reply',
       onClick: () => switchPage('letters')
@@ -6852,7 +6852,7 @@ function triggerIncomingCall() {
   // 播放来电铃声（联系人专属优先，ended事件无缝循环）
   startCallRingtone(resolveSoundId('call', { contactId: contact.id }));
 
-  if (appData.settings.desktopNotify) {
+  if (true) {
     showNotification('来电', `${contact.name} 来电中...`, {
       tag: 'incoming-call',
       onClick: () => { selectConversation(contact.id, 'contact'); switchPage('chat'); }
@@ -6900,7 +6900,7 @@ function requestNotificationPermission() {
 
 function showNotification(title, body, options) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  var opt = { body: body || '', tag: (options && options.tag) || 'chat-app', renotify: true, silent: false, data: { url: location.href } };
+  var opt = { body: body || '', tag: ((options && options.tag) || 'chat-app') + '-' + Date.now(), renotify: true, silent: false, data: { url: location.href } };
   var getting = ('serviceWorker' in navigator) ? navigator.serviceWorker.getRegistration() : Promise.resolve(null);
   Promise.resolve(getting).then(function (r) {
     if (r && r.showNotification) return r.showNotification(title, opt);
