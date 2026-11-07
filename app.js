@@ -6900,8 +6900,7 @@ function requestNotificationPermission() {
 
 function showNotification(title, body, options) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  if (document.visibilityState === 'visible') return;
-  var opt = { body: body || '', tag: (options && options.tag) || 'chat-app', renotify: true, silent: true, data: { url: location.href } };
+  var opt = { body: body || '', tag: (options && options.tag) || 'chat-app', renotify: true, silent: false, data: { url: location.href } };
   var getting = ('serviceWorker' in navigator) ? navigator.serviceWorker.getRegistration() : Promise.resolve(null);
   Promise.resolve(getting).then(function (r) {
     if (r && r.showNotification) return r.showNotification(title, opt);
