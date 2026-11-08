@@ -6263,6 +6263,21 @@ function clearWords() {
   showToast('已清空');
 }
 
+function clearAllWords() {
+  const groups = getActiveWordGroups();
+  let total = 0;
+  groups.forEach(g => { if (g.items) total += g.items.length; });
+  if (!total) { showToast('词条已经是空的'); return; }
+  const scope = isConvWordsEnabled() ? '当前联系人的专属词库' : '全局词库';
+  if (!confirm(`确定清空${scope}里的全部 ${total} 条词条吗？
+所有分类一起清，分类本身保留。`)) return;
+  groups.forEach(g => { g.items = []; });
+  saveData();
+  renderWordList();
+  renderWordCategories();
+  showToast('已清空 ' + total + ' 条词条');
+}
+
 // ==================== 表情管理 ====================
 function openAddMyEmojiModal() {
   openAddEmojiModal('my');
