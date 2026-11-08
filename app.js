@@ -67,7 +67,7 @@ const defaultAppData = {
     dndEnabled: false,
     dndStart: '22:00',
     dndEnd: '08:00',
-    desktopNotify: true,
+    desktopNotify: false,
     keepAlive: true,
     timedMsgEnabled: false,
     timedMsgInterval: 30,
@@ -1386,7 +1386,7 @@ function initToggles() {
     appData.settings.desktopNotify = !appData.settings.desktopNotify;
     this.classList.toggle('active', appData.settings.desktopNotify);
     saveData();
-    if (true) {
+    if (appData.settings.desktopNotify) {
       requestNotificationPermission();
     }
   });
@@ -1398,17 +1398,7 @@ function initToggles() {
     appData.settings.keepAlive = !appData.settings.keepAlive;
     this.classList.toggle('active', appData.settings.keepAlive);
     saveData();
-    if (appData.settings.keepAlive) { startKeepAliveAudio(); showToast('后台保活：开'); }
-    else { stopKeepAliveAudio(); showToast('后台保活：关'); }
   });
-
-  if (appData.settings.keepAlive) {
-    startKeepAliveAudio();
-    document.addEventListener('click', function onceAlive(){
-      if (appData.settings.keepAlive) startKeepAliveAudio();
-      document.removeEventListener('click', onceAlive);
-    });
-  }
 
   // ===== 按会话独立设置开关（聊天背景 / 通话背景 / 词条库） =====
   const chatBgPerConvEl = document.getElementById('chatBgPerConvToggle');
@@ -2935,8 +2925,7 @@ function addMessageTo(chatType, chatId, msg) {
   if (isSelf(msg.sender) && !msg._noSound) playSendSound();
   
   // 桌面通知
-  if (!isSelf(msg.sender) && isViewing) { ntfDbg('通知: 你正看着这个会话，照样弹'); }
-  if (!isSelf(msg.sender)) {
+  if (appData.settings.desktopNotify && !isSelf(msg.sender)) {
     let notifyName = '新消息';
     if (chatType === 'group') {
       const g = appData.groups.find(x => x.id === chatId);
@@ -5303,7 +5292,7 @@ function generateLetterReply(letterId) {
   saveData();
   renderLetters();
   
-  if (true) {
+  if (appData.settings.desktopNotify) {
     showNotification('收到回信', `来自${letter.recipient}的回信`, {
       tag: 'letter-reply',
       onClick: () => switchPage('letters')
@@ -6863,7 +6852,7 @@ function triggerIncomingCall() {
   // 播放来电铃声（联系人专属优先，ended事件无缝循环）
   startCallRingtone(resolveSoundId('call', { contactId: contact.id }));
 
-  if (true) {
+  if (appData.settings.desktopNotify) {
     showNotification('来电', `${contact.name} 来电中...`, {
       tag: 'incoming-call',
       onClick: () => { selectConversation(contact.id, 'contact'); switchPage('chat'); }
@@ -6909,57 +6898,25 @@ function requestNotificationPermission() {
   });
 }
 
-function ntfDbg(t){try{var d=document.getElementById('ntfDbg');if(!d){d=document.createElement('div');d.id='ntfDbg';d.style.cssText='position:fixed;left:8px;bottom:8px;z-index:999999;background:rgba(0,0,0,.85);color:#7CFC00;font:12px monospace;padding:6px 8px;border-radius:6px;max-width:92vw;white-space:pre-wrap;pointer-events:none;line-height:1.4';document.body.appendChild(d);}d.textContent=t;}catch(e){}}
-var KEEP_ALIVE_WAV = 'data:audio/wav;base64,UklGRsQPAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YaAPAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA';
-function keepAliveAudioEl(){
-  var a = document.getElementById('keepAliveAudio');
-  if (!a) {
-    a = document.createElement('audio');
-    a.id = 'keepAliveAudio';
-    a.loop = true;
-    a.volume = 0.02;
-    a.setAttribute('playsinline', '');
-    a.style.display = 'none';
-    a.src = KEEP_ALIVE_WAV;
-    document.body.appendChild(a);
-  }
-  return a;
-}
-function startKeepAliveAudio(){
-  try { var a = keepAliveAudioEl(); var p = a.play(); if (p && p.catch) p.catch(function(){}); } catch (e) {}
-}
-function stopKeepAliveAudio(){
-  try { var a = document.getElementById('keepAliveAudio'); if (a) a.pause(); } catch (e) {}
-}
-
 function showNotification(title, body, options) {
-  try {
-    if (!('Notification' in window)) { ntfDbg('通知: 浏览器没有Notification'); return; }
-    if (Notification.permission !== 'granted') { ntfDbg('通知: 权限=' + Notification.permission); return; }
-    var opt = { body: body || '', tag: ((options && options.tag) || 'chat-app') + '-' + Date.now(), renotify: true, silent: false, data: { url: location.href } };
-    ntfDbg('通知: 开始发 ' + title);
-    var getting = ('serviceWorker' in navigator) ? navigator.serviceWorker.getRegistration() : Promise.resolve(null);
-    Promise.resolve(getting).then(function (r) {
-      if (r && r.showNotification) {
-        return r.showNotification(title, opt).then(function () { ntfDbg('通知: SW已发 ' + title); });
-      }
-      throw new Error('no sw');
-    }).catch(function (e1) {
-      ntfDbg('通知: SW没成(' + (e1 && e1.message) + ')，改直发');
-      try {
-        var n = new Notification(title, opt);
-        ntfDbg('通知: 直发已发 ' + title);
-        n.onclick = function () {
-          try { window.focus(); } catch (e) {}
-          if (options && typeof options.onClick === 'function') options.onClick();
-          n.close();
-        };
-        setTimeout(function () { n.close(); }, 6000);
-      } catch (e2) {
-        ntfDbg('通知: 两条路都断 ' + (e2 && e2.message));
-      }
-    });
-  } catch (e) { ntfDbg('通知: 异常 ' + e.message); }
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  if (document.visibilityState === 'visible') return;
+  var opt = { body: body || '', tag: ((options && options.tag) || 'chat-app') + '-' + Date.now(), renotify: true, silent: true, data: { url: location.href } };
+  var getting = (typeof registerNotificationWorker === 'function') ? registerNotificationWorker() : (('serviceWorker' in navigator) ? navigator.serviceWorker.getRegistration() : Promise.resolve(null));
+  Promise.resolve(getting).then(function (r) {
+    if (r && r.showNotification) return r.showNotification(title, opt);
+    throw new Error('no sw');
+  }).catch(function () {
+    try {
+      var n = new Notification(title, opt);
+      n.onclick = function () {
+        try { window.focus(); } catch (e) {}
+        if (options && typeof options.onClick === 'function') options.onClick();
+        n.close();
+      };
+      setTimeout(function () { n.close(); }, 6000);
+    } catch (e) {}
+  });
 }
 
 function testDesktopNotification() {
