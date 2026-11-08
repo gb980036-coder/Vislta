@@ -67,7 +67,7 @@ const defaultAppData = {
     dndEnabled: false,
     dndStart: '22:00',
     dndEnd: '08:00',
-    desktopNotify: false,
+    desktopNotify: true,
     keepAlive: true,
     timedMsgEnabled: false,
     timedMsgInterval: 30,
@@ -2931,7 +2931,7 @@ function addMessageTo(chatType, chatId, msg) {
   if (isSelf(msg.sender) && !msg._noSound) playSendSound();
   
   // 桌面通知
-  if (appData.settings.desktopNotify && !isSelf(msg.sender) && !isViewing) {
+  if (appData.settings.desktopNotify && !isSelf(msg.sender)) {
     let notifyName = '新消息';
     if (chatType === 'group') {
       const g = appData.groups.find(x => x.id === chatId);
@@ -2941,7 +2941,7 @@ function addMessageTo(chatType, chatId, msg) {
       notifyName = c ? c.name : notifyName;
     }
     showNotification(notifyName, msgNotifyPreview(msg), {
-      tag: 'chat-' + chatType + '-' + chatId, // 同一会话通知替换更新，不堆积
+      tag: 'chat-' + chatType + '-' + chatId, force: true, // 同一会话通知替换更新，不堆积
       onClick: () => { selectConversation(chatId, chatType); switchPage('chat'); }
     });
   }
@@ -5300,7 +5300,7 @@ function generateLetterReply(letterId) {
   
   if (appData.settings.desktopNotify) {
     showNotification('收到回信', `来自${letter.recipient}的回信`, {
-      tag: 'letter-reply',
+      tag: 'letter-reply', force: true,
       onClick: () => switchPage('letters')
     });
   }
@@ -6860,7 +6860,7 @@ function triggerIncomingCall() {
 
   if (appData.settings.desktopNotify) {
     showNotification('来电', `${contact.name} 来电中...`, {
-      tag: 'incoming-call',
+      tag: 'incoming-call', force: true,
       onClick: () => { selectConversation(contact.id, 'contact'); switchPage('chat'); }
     });
   }
