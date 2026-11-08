@@ -67,7 +67,7 @@ const defaultAppData = {
     dndEnabled: false,
     dndStart: '22:00',
     dndEnd: '08:00',
-    desktopNotify: true,
+    desktopNotify: true, quietNotify: false, quietStart: '23:00', quietEnd: '07:00',
     keepAlive: true,
     timedMsgEnabled: false,
     timedMsgInterval: 30,
@@ -1399,6 +1399,27 @@ function initToggles() {
   
   // 初始回填开关状态
   document.getElementById('desktopNotifyToggle').classList.toggle('active', !!appData.settings.desktopNotify);
+
+  // 到点自动静音
+  const qtEl = document.getElementById('quietToggle');
+  if (qtEl) {
+    qtEl.classList.toggle('active', !!appData.settings.quietNotify);
+    qtEl.addEventListener('click', function () {
+      appData.settings.quietNotify = !appData.settings.quietNotify;
+      this.classList.toggle('active', !!appData.settings.quietNotify);
+      saveData();
+    });
+  }
+  const qsEl = document.getElementById('quietStart');
+  const qeEl = document.getElementById('quietEnd');
+  if (qsEl) {
+    qsEl.value = appData.settings.quietStart || '23:00';
+    qsEl.addEventListener('change', function () { appData.settings.quietStart = this.value || '23:00'; saveData(); });
+  }
+  if (qeEl) {
+    qeEl.value = appData.settings.quietEnd || '07:00';
+    qeEl.addEventListener('change', function () { appData.settings.quietEnd = this.value || '07:00'; saveData(); });
+  }
 
   document.getElementById('keepAliveToggle').addEventListener('click', function() {
     appData.settings.keepAlive = !appData.settings.keepAlive;
@@ -2931,7 +2952,7 @@ function addMessageTo(chatType, chatId, msg) {
   if (isSelf(msg.sender) && !msg._noSound) playSendSound();
   
   // 桌面通知
-  if (!isSelf(msg.sender)) {
+  if (appData.settings.desktopNotify && !isSelf(msg.sender)) {
     let notifyName = '新消息';
     if (chatType === 'group') {
       const g = appData.groups.find(x => x.id === chatId);
@@ -6937,6 +6958,20 @@ function requestNotificationPermission() {
   });
 }
 
+function isQuietNow() {
+  try {
+    if (!appData.settings.quietNotify) return false;
+    var s = appData.settings.quietStart || '23:00';
+    var e = appData.settings.quietEnd || '07:00';
+    var now = new Date();
+    var cur = now.getHours() * 60 + now.getMinutes();
+    var ps = s.split(':'), pe = e.split(':');
+    var a = parseInt(ps[0], 10) * 60 + parseInt(ps[1] || '0', 10);
+    var bb = parseInt(pe[0], 10) * 60 + parseInt(pe[1] || '0', 10);
+    if (isNaN(a) || isNaN(bb) || a === bb) return false;
+    return a < bb ? (cur >= a && cur < bb) : (cur >= a || cur < bb);
+  } catch (err) { return false; }
+}
 function ntfSay(t){
   var d=document.getElementById('ntfBar');
   if(!d){d=document.createElement('div');d.id='ntfBar';d.style.cssText='position:fixed;left:0;right:0;top:0;z-index:99999;background:rgba(0,140,0,.95);color:#fff;font-size:12px;line-height:18px;padding:4px 8px;font-family:monospace;white-space:nowrap;overflow:hidden;';document.body.appendChild(d);}
@@ -6949,6 +6984,7 @@ function showNotification(title, body, options) {
   if (!('Notification' in window)) { ntfSay('无 Notification'); return; }
   if (Notification.permission !== 'granted') { ntfSay('权限=' + Notification.permission); return; }
   if (!options.force && document.visibilityState === 'visible') { ntfSay('前台跳过'); return; }
+  if (!options.noQuiet && isQuietNow()) { return; }
   ;
   const tag = options.tag || 'chat-app';
 
@@ -7006,7 +7042,7 @@ function testDesktopNotification() {
   if (Notification.permission === 'denied') { showToast('通知被浏览器拦了，去站点设置里放开'); return; }
   if (Notification.permission !== 'granted') {
     requestNotificationPermission().then(function (granted) {
-      if (granted) showNotification('Vislta 测试通知', '能弹出来就说明通了。', { tag: 'test', force: true });
+      if (granted) showNotification('Vislta 测试通知', '能弹出来就说明通了。', { tag: 'test', noQuiet: true, force: true });
     });
     return;
   }
@@ -9907,6 +9943,15 @@ function init() {
 
 // 启动
 init();
+
+// 开关迁移：有权限但开关是关的，自动打开一次
+if (!appData.settings.ntfMigrated) {
+  try {
+    if (('Notification' in window) && Notification.permission === 'granted') appData.settings.desktopNotify = true;
+  } catch (e) {}
+  appData.settings.ntfMigrated = true;
+  saveData();
+}
 
 if ('serviceWorker' in navigator) { window.addEventListener('load', function () { registerNotificationWorker(); }); }
 
