@@ -3620,12 +3620,33 @@ function parseNeteaseId(raw) {
   return m ? m[1] : '';
 }
 
-function toggleMusicPanel() {
+function fmtTime(sec) {
+  sec = Math.floor(sec || 0);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m + ':' + (s < 10 ? '0' : '') + s;
+}
+
+function openMusicSheet() {
   const panel = document.getElementById('musicPanel');
+  const mask = document.getElementById('musicMask');
   if (!panel) return;
-  const open = panel.style.display !== 'none';
-  panel.style.display = open ? 'none' : 'block';
-  if (!open) renderMusicList();
+  renderMusicList();
+  if (mask) mask.style.display = 'block';
+  panel.style.transform = 'translate(-50%,0)';
+}
+
+function closeMusicSheet() {
+  const panel = document.getElementById('musicPanel');
+  const mask = document.getElementById('musicMask');
+  if (panel) panel.style.transform = 'translate(-50%,105%)';
+  if (mask) setTimeout(function () { mask.style.display = 'none'; }, 320);
+}
+
+function toggleMusicPanel() {
+  const mask = document.getElementById('musicMask');
+  if (mask && mask.style.display === 'block') closeMusicSheet();
+  else openMusicSheet();
 }
 
 function addMusicFromInput() {
@@ -3639,59 +3660,124 @@ function addMusicFromInput() {
   const quoted = raw.match(/《([^》]+)》/);
   if (quoted) name = quoted[1].trim();
   if (!Array.isArray(appData.music)) appData.music = [];
-  const exist = appData.music.find(m => m.id === id);
-  if (!exist) {
-    appData.music.unshift({ id, name: name || '载入中…', addedAt: Date.now() });
-  }
+  const exist = appData.music.find(function (m) { return m.id === id; });
+  if (!exist) appData.music.unshift({ id: id, name: name || ('网易云 ' + id), artist: '', addedAt: Date.now() });
   el.value = '';
   saveData();
   playMusic(id);
   fetchMusicInfo(id);
-  setTimeout(function () {
-    const m = (appData.music || []).find(x => x.id === id);
-    if (m && m.name === '载入中…') { m.name = '网易云 ' + id; saveData(); renderMusicList(); }
-  }, 4000);
 }
 
 function fetchMusicInfo(id) {
-  fetch(musicApiUrl(id, 'song')).then(r => r.json()).then(list => {
+  fetch(musicApiUrl(id, 'song')).then(function (r) { return r.json(); }).then(function (list) {
     const info = Array.isArray(list) ? list[0] : list;
     if (!info || !info.name) return;
-    const m = (appData.music || []).find(x => x.id === id);
+    const m = (appData.music || []).find(function (x) { return x.id === id; });
     if (!m) return;
-    m.name = info.name + (info.artist ? ' - ' + info.artist : '');
+    m.name = info.name;
+    m.artist = info.artist || '';
+    if (info.pic) m.pic = String(info.pic).replace(/^http:/, 'https:');
     saveData();
     renderMusicList();
-  }).catch(() => {});
+    if (appData.currentMusicId === id) updateMusicHero();
+  }).catch(function () {});
+}
+
+function updateMusicHero() {
+  const id = appData.currentMusicId;
+  const m = (appData.music || []).find(function (x) { return x.id === id; });
+  const titleEl = document.getElementById('musicTitle');
+  const artistEl = document.getElementById('musicArtist');
+  const cover = document.getElementById('musicCover');
+  if (titleEl) titleEl.textContent = m ? m.name : '还没选歌';
+  if (artistEl) artistEl.textContent = (m && m.artist) ? m.artist : (m ? '未知歌手' : '贴个链接开始');
+  if (cover) {
+    if (m && m.pic) {
+      cover.style.backgroundImage = 'url(' + m.pic + ')';
+      cover.innerHTML = '';
+    } else {
+      cover.style.backgroundImage = 'linear-gradient(135deg,#8fb8e8,#b9a8e8)';
+      cover.innerHTML = '<i class="fas fa-music"></i>';
+    }
+  }
+}
+
+function setMusicPlayIcon(playing) {
+  const btn = document.getElementById('musicPlayBtn');
+  if (btn) btn.innerHTML = '<i class="fas fa-' + (playing ? 'pause' : 'play') + '"></i>';
+}
+
+function updateMusicProgress() {
+  const au = document.getElementById('musicAudio');
+  const seek = document.getElementById('musicSeek');
+  const cur = document.getElementById('musicCur');
+  const dur = document.getElementById('musicDur');
+  if (!au) return;
+  const d = au.duration || 0;
+  if (seek) seek.value = d ? Math.round((au.currentTime / d) * 1000) : 0;
+  if (cur) cur.textContent = fmtTime(au.currentTime);
+  if (dur) dur.textContent = fmtTime(d);
+}
+
+function seekMusic(v) {
+  const au = document.getElementById('musicAudio');
+  if (!au || !au.duration) return;
+  au.currentTime = (v / 1000) * au.duration;
 }
 
 function playMusic(id) {
   const box = document.getElementById('musicPlayerBox');
   if (!box || !id) return;
-  box.innerHTML = '<div style="padding:8px 10px 2px;">'
-    + '<audio id="musicAudio" controls preload="none" style="width:100%;height:36px;" '
-    + 'src="' + musicApiUrl(id, 'url') + '" '
-    + '></audio>'
-    + '<div style="font-size:11px;color:var(--text-tertiary);padding:4px 2px 0;">播放不了就去网易云搜歌名</div></div>';
   appData.currentMusicId = id;
-  saveData();
-  renderMusicList();
+  updateMusicHero();
+  box.innerHTML = '<audio id="musicAudio" preload="none" src="' + musicApiUrl(id, 'url') + '"></audio>';
   const au = document.getElementById('musicAudio');
   if (au) {
-    au.addEventListener('error', function () { showToast('这首歌播不了，换一首试试'); });
+    au.addEventListener('timeupdate', updateMusicProgress);
+    au.addEventListener('loadedmetadata', updateMusicProgress);
+    au.addEventListener('play', function () { setMusicPlayIcon(true); });
+    au.addEventListener('pause', function () { setMusicPlayIcon(false); });
+    au.addEventListener('ended', musicNext);
+    au.addEventListener('error', function () { setMusicPlayIcon(false); showToast('这首歌播不了，换一首试试'); });
     const pr = au.play();
     if (pr && pr.catch) pr.catch(function () {});
   }
+  saveData();
+  renderMusicList();
 }
 
+function toggleMusicPlay() {
+  const au = document.getElementById('musicAudio');
+  if (!au) { if (appData.currentMusicId) playMusic(appData.currentMusicId); return; }
+  if (au.paused) {
+    const pr = au.play();
+    if (pr && pr.catch) pr.catch(function () {});
+  } else {
+    au.pause();
+  }
+}
+
+function musicStep(delta) {
+  const list = appData.music || [];
+  if (!list.length) return;
+  let i = list.findIndex(function (m) { return m.id === appData.currentMusicId; });
+  if (i < 0) i = 0;
+  i = (i + delta + list.length) % list.length;
+  playMusic(list[i].id);
+}
+
+function musicPrev() { musicStep(-1); }
+function musicNext() { musicStep(1); }
+
 function renameMusic(id) {
-  const m = (appData.music || []).find(x => x.id === id);
+  const m = (appData.music || []).find(function (x) { return x.id === id; });
   if (!m) return;
   const v = prompt('歌名', m.name || '');
   if (v === null) return;
   m.name = v.trim() || m.name;
   saveData();
   renderMusicList();
+  if (appData.currentMusicId === id) updateMusicHero();
 }
 
 function removeMusic(index) {
@@ -3706,24 +3792,23 @@ function renderMusicList() {
   const list = document.getElementById('musicList');
   if (!list) return;
   if (Array.isArray(appData.music)) {
-    appData.music.forEach(m => {
+    appData.music.forEach(function (m) {
       if (!m.tried && /^网易云 \d+$/.test(m.name || '')) { m.tried = true; fetchMusicInfo(m.id); }
     });
   }
   if (!Array.isArray(appData.music) || appData.music.length === 0) {
-    list.innerHTML = '<div style="font-size:12px;color:var(--text-tertiary);padding:6px 0;">还没歌。贴个链接吧</div>';
+    list.innerHTML = '<div style="font-size:12px;color:var(--text-tertiary);padding:8px 0;">还没歌。上面贴个链接吧</div>';
     return;
   }
-  list.innerHTML = appData.music.map((m, i) => {
+  list.innerHTML = appData.music.map(function (m, i) {
     const active = m.id === appData.currentMusicId;
     const color = active ? 'color:var(--accent-color,#3a7bd5);font-weight:600;' : '';
-    const playIcon = active ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-play"></i>';
-    return `<div style="display:flex;align-items:center;gap:4px;padding:7px 0;border-top:1px solid var(--border-color);">`
-      + `<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${color}" onclick="playMusic('${m.id}')">${escapeHtml(m.name)}</span>`
-      + `<button class="btn btn-secondary" style="padding:3px 7px;font-size:11px;" onclick="playMusic('${m.id}')">${playIcon}</button>`
-      + `<button class="btn btn-secondary" style="padding:3px 7px;font-size:11px;" onclick="renameMusic('${m.id}')">名</button>`
-      + `<button class="btn btn-danger" style="padding:3px 7px;font-size:11px;" onclick="removeMusic(${i})">删</button>`
-      + `</div>`;
+    const label = m.name + (m.artist ? ' - ' + m.artist : '');
+    return '<div style="display:flex;align-items:center;gap:6px;padding:8px 0;border-top:1px solid var(--border-color);">'
+      + '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + color + '" onclick="playMusic(\'' + m.id + '\')">' + escapeHtml(label) + '</span>'
+      + '<button class="btn btn-secondary" style="padding:3px 8px;font-size:11px;" onclick="renameMusic(\'' + m.id + '\')">名</button>'
+      + '<button class="btn btn-danger" style="padding:3px 8px;font-size:11px;" onclick="removeMusic(' + i + ')">删</button>'
+      + '</div>';
   }).join('');
 }
 

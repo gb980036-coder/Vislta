@@ -1225,20 +1225,40 @@
 
 
 <!-- 音乐悬浮按钮 -->
-<div id="musicFab" onclick="toggleMusicPanel()" title="音乐" style="position:fixed;right:12px;bottom:84px;z-index:9000;width:38px;height:38px;border-radius:50%;background:rgba(28,28,32,.55);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.18);cursor:pointer;font-size:14px;opacity:.9;"><i class="fas fa-music"></i></div>
-<div id="musicPanel" style="display:none;position:fixed;right:10px;bottom:132px;width:min(320px,calc(100vw - 20px));background:var(--bg-secondary,#fff);border:1px solid var(--border-color,#e5e5e5);border-radius:14px;box-shadow:0 6px 24px rgba(0,0,0,.18);z-index:9000;overflow:hidden;">
-  <div style="padding:9px 12px;display:flex;align-items:center;justify-content:space-between;">
-    <div style="font-size:13px;font-weight:600;">音乐<span style="font-size:10px;font-weight:400;color:var(--text-tertiary);margin-left:6px;">网易云</span></div>
-    <div onclick="toggleMusicPanel()" style="cursor:pointer;padding:2px 6px;color:var(--text-tertiary);">&#10005;</div>
+<div id="musicFab" onclick="toggleMusicPanel()" title="音乐" style="position:fixed;right:12px;bottom:84px;z-index:9000;width:38px;height:38px;border-radius:50%;background:rgba(28,28,32,.5);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.18);cursor:pointer;font-size:14px;"><i class="fas fa-music"></i></div>
+
+<div id="musicMask" onclick="closeMusicSheet()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9000;"></div>
+<div id="musicPanel" style="position:fixed;left:50%;bottom:0;transform:translate(-50%,105%);transition:transform .3s cubic-bezier(.2,.8,.2,1);width:min(480px,100vw);max-height:82vh;background:var(--bg-secondary,#fff);border-radius:22px 22px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.28);z-index:9001;display:flex;flex-direction:column;overflow:hidden;">
+  <div style="flex:0 0 auto;padding:8px 0 8px;display:flex;justify-content:center;"><div style="width:38px;height:4px;border-radius:2px;background:var(--border-color,#ddd);"></div></div>
+  <div style="flex:0 0 auto;padding:2px 16px 4px;display:flex;align-items:center;justify-content:space-between;">
+    <div style="font-size:14px;font-weight:600;">音乐<span style="font-size:10px;color:var(--text-tertiary);font-weight:400;margin-left:6px;">网易云</span></div>
+    <div onclick="closeMusicSheet()" style="cursor:pointer;padding:4px 8px;color:var(--text-tertiary);font-size:14px;">&#10005;</div>
   </div>
-  <div id="musicPlayerBox" style="font-size:0;"></div>
-  <div style="display:flex;gap:6px;padding:6px 10px 10px;">
-    <input id="musicInput" class="input" placeholder="粘贴网易云链接或歌曲ID" style="flex:1;font-size:12px;padding:7px 9px;min-width:0;">
-    <button class="btn btn-primary" style="padding:7px 10px;font-size:12px;" onclick="addMusicFromInput()">加</button>
+  <div style="flex:0 0 auto;display:flex;gap:14px;align-items:center;padding:6px 16px 12px;">
+    <div id="musicCover" style="width:78px;height:78px;border-radius:16px;background:linear-gradient(135deg,#8fb8e8,#b9a8e8);background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;flex:0 0 auto;box-shadow:0 4px 14px rgba(0,0,0,.12);"><i class="fas fa-music"></i></div>
+    <div style="flex:1;min-width:0;">
+      <div id="musicTitle" style="font-size:16px;font-weight:600;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">还没选歌</div>
+      <div id="musicArtist" style="font-size:12px;color:var(--text-secondary,#888);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">贴个链接开始</div>
+    </div>
   </div>
-  <div id="musicList" style="max-height:168px;overflow:auto;padding:0 10px 10px;"></div>
+  <div id="musicPlayerBox" style="display:none;"></div>
+  <div style="flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:0 10px 6px;">
+    <span id="musicCur" style="font-size:11px;color:var(--text-tertiary);width:34px;text-align:right;">0:00</span>
+    <input id="musicSeek" type="range" min="0" max="1000" value="0" oninput="seekMusic(this.value)" style="flex:1;height:4px;accent-color:#3a7bd5;">
+    <span id="musicDur" style="font-size:11px;color:var(--text-tertiary);width:34px;">0:00</span>
+  </div>
+  <div style="flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:24px;padding:4px 0 8px;">
+    <div onclick="musicPrev()" style="cursor:pointer;width:42px;height:42px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary,#555);font-size:16px;"><i class="fas fa-step-backward"></i></div>
+    <div id="musicPlayBtn" onclick="toggleMusicPlay()" style="cursor:pointer;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#4f8ef7,#6f5be8);color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 4px 14px rgba(79,142,247,.4);"><i class="fas fa-play"></i></div>
+    <div onclick="musicNext()" style="cursor:pointer;width:42px;height:42px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary,#555);font-size:16px;"><i class="fas fa-step-forward"></i></div>
+  </div>
+  <div style="flex:0 0 auto;display:flex;gap:6px;padding:8px 16px 10px;">
+    <input id="musicInput" class="input" placeholder="粘贴网易云链接或歌曲ID" style="flex:1;font-size:12px;padding:8px 10px;min-width:0;">
+    <button class="btn btn-primary" style="padding:8px 12px;font-size:12px;" onclick="addMusicFromInput()">加</button>
+  </div>
+  <div id="musicList" style="flex:1 1 auto;overflow:auto;padding:0 16px 14px;"></div>
 </div>
 
-<script src="app.js?v=20"></script>
+<script src="app.js?v=21"></script>
 </body>
 </html>
