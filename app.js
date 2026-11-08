@@ -6095,6 +6095,11 @@ function importWordsFromText(mode) {
       isGroupFormat = true;
       importData = { customReplyGroups: importData };
     }
+    // 兼容无分类格式：{ customReplies: [...] } / { words: [...] }
+    if (!isGroupFormat && importData && !Array.isArray(importData) && typeof importData === 'object') {
+      var flat = importData.customReplies || importData.words || importData.replies;
+      if (Array.isArray(flat)) importData = flat;
+    }
   } catch (e) {
     // 不是JSON，按纯文本处理（支持【分组名】行：该行为分组，以下内容归入当前分组）
     const lines = text.split('\n');
