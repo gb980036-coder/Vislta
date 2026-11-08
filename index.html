@@ -733,6 +733,13 @@
             </div>
             <div class="setting-item">
               <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">信件送达延迟（分钟）</div>
+                <div class="setting-desc">0 为立即送达，设了就显示在途多久</div>
+              </div>
+              <input type="number" class="input" id="letterDeliverDelay" style="width:60px;padding:4px 6px;font-size:12px;" value="0" min="0" onchange="appData.settings.letterDeliverDelay=Math.max(0,parseInt(this.value)||0);saveData();showToast(&#39;已保存&#39;)">
+            </div>
+            <div class="setting-item">
+              <div class="setting-content" style="padding-left:60px;">
                 <div class="setting-label">回信字卡数量</div>
                 <div class="setting-desc">随机范围，每次回信在区间内随机</div>
               </div>
@@ -947,6 +954,7 @@
                 <option value="default">默认</option>
                 <option value="asc">升序</option>
                 <option value="desc">降序</option>
+                <option value="freq">常用</option>
               </select>
               <button class="btn btn-secondary" id="wordManageBtn" style="padding:7px 10px;font-size:12px;flex-shrink:0;" onclick="toggleWordManageMode()">管理</button>
             </div>
@@ -977,6 +985,10 @@
               <button class="btn btn-danger" style="width:100%;padding:8px;font-size:12px;" onclick="clearAllWords()">
                 <i class="fas fa-trash-alt"></i> 清空所有词条
               </button>
+            </div>
+            <div style="padding:0 12px 12px;">
+              <div class="setting-desc" style="font-size:11px;margin-bottom:4px;">关键词触发：一行一条，写作 关键词=&gt;要回的话。你的话里含这个词，就优先回这句</div>
+              <textarea class="input" id="keywordRulesInput" rows="4" style="width:100%;font-size:12px;resize:vertical;box-sizing:border-box;" placeholder="晚安=&gt;晚安，早点睡" onchange="appData.settings.keywordRules=this.value;saveData();showToast(&#39;已保存&#39;)"></textarea>
             </div>
           </div>
         </div>
@@ -1013,6 +1025,33 @@
         </div>
         
         <!-- 数据备份 -->
+        <div class="collapsible" id="backupCollapsible">
+          <div class="collapsible-header">
+            <div class="collapsible-icon"><i class="fas fa-database"></i></div>
+            <div class="collapsible-title">数据备份</div>
+            <i class="fas fa-chevron-down collapsible-arrow"></i>
+          </div>
+          <div class="collapsible-body">
+            <div class="setting-desc" style="padding:10px 14px 6px;font-size:12px;">全量备份包含聊天、词条、设置、信件、朋友圈等所有本地数据</div>
+            <div style="padding:0 12px 10px;display:flex;gap:8px;">
+              <button class="btn btn-primary" style="flex:1;padding:8px;font-size:12px;" onclick="exportAllData()">
+                <i class="fas fa-download"></i> 导出全量
+              </button>
+              <button class="btn btn-secondary" style="flex:1;padding:8px;font-size:12px;" onclick="document.getElementById(&#39;restoreFileInput&#39;).click()">
+                <i class="fas fa-upload"></i> 恢复
+              </button>
+            </div>
+            <input type="file" id="restoreFileInput" accept=".json,application/json" style="display:none;" onchange="restoreAllData(this)">
+            <div style="padding:0 12px 12px;display:flex;gap:8px;">
+              <button class="btn btn-secondary" style="flex:1;padding:8px;font-size:12px;" onclick="showStorageUsage()">
+                <i class="fas fa-hdd"></i> 查看占用
+              </button>
+              <button class="btn btn-secondary" style="flex:1;padding:8px;font-size:12px;" onclick="flushSaveData();showToast(&#39;已写入本地&#39;)">
+                <i class="fas fa-save"></i> 立即保存
+              </button>
+            </div>
+          </div>
+        </div>
         <!-- 钱包 -->
         <div class="collapsible" id="walletCollapsible">
           <div class="collapsible-header">
@@ -1185,6 +1224,6 @@
 <div class="toast" id="toast"></div>
 
 
-<script src="app.js?v=17"></script>
+<script src="app.js?v=18"></script>
 </body>
 </html>

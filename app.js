@@ -70,6 +70,8 @@ const defaultAppData = {
     desktopNotify: true, quietNotify: false, quietStart: '23:00', quietEnd: '07:00',
     keepAlive: true,
     timedMsgEnabled: false,
+    keywordRules: '',
+    letterDeliverDelay: 0,
     timedMsgInterval: 30,
     // ===== 铃声与音效 =====
     soundEnabled: true,
@@ -218,6 +220,8 @@ function loadData() {
   if (typeof s.soundEnabled !== 'boolean') s.soundEnabled = true;
   if (typeof s.soundVolume !== 'number' || s.soundVolume < 0 || s.soundVolume > 100) s.soundVolume = 80;
   if (!s.ringtoneCall) s.ringtoneCall = 'call_classic';
+  if (typeof s.keywordRules !== 'string') s.keywordRules = '';
+  if (typeof s.letterDeliverDelay !== 'number') s.letterDeliverDelay = 0;
   if (!s.ringtoneMsg) s.ringtoneMsg = 'msg_default';
   if (!s.ringtoneGroup) s.ringtoneGroup = 'grp_default';
   if (!s.ringtoneSystem) s.ringtoneSystem = 'sys_default';
@@ -283,6 +287,7 @@ function loadData() {
   if (!appData.convSettings) appData.convSettings = {};
   // 清理会话配置中废弃的问卷间隔字段（时机已改为完全随机）
   Object.values(appData.convSettings).forEach(cs => { delete cs.surveyAutoInterval; });
+  if (!appData.wordUsage) appData.wordUsage = {};
   if (!appData.unreadMap) appData.unreadMap = {};
   if (!appData.pinnedConversations) appData.pinnedConversations = {};
   if (!appData.surveyTemplates) appData.surveyTemplates = {};
@@ -290,7 +295,9 @@ function loadData() {
   if (!appData.mySurveyLibrary) appData.mySurveyLibrary = {};
 }
 
-function saveData() {
+let __saveTimer = null;
+function flushSaveData() {
+  if (__saveTimer) { clearTimeout(__saveTimer); __saveTimer = null; }
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
   } catch (e) {
@@ -298,6 +305,17 @@ function saveData() {
     showToast('保存数据失败');
   }
 }
+
+// 高频操作合并写，减少卡顿；关页前会自动落盘
+function saveData() {
+  if (__saveTimer) clearTimeout(__saveTimer);
+  __saveTimer = setTimeout(flushSaveData, 300);
+}
+
+window.addEventListener('pagehide', flushSaveData);
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'hidden') flushSaveData();
+});
 
 // ==================== 工具函数 ====================
 function generateId() {
@@ -478,6 +496,10 @@ function applyTheme() {
   });
   
   // 应用消息字体大小
+  const kwInputEl = document.getElementById('keywordRulesInput');
+  if (kwInputEl) kwInputEl.value = appData.settings.keywordRules || '';
+  const ldDelayEl = document.getElementById('letterDeliverDelay');
+  if (ldDelayEl) ldDelayEl.value = appData.settings.letterDeliverDelay || 0;
   if (appData.settings.msgFontSize) {
     document.documentElement.style.setProperty('--msg-font-size', appData.settings.msgFontSize + 'px');
     const fontSizeSlider = document.getElementById('fontSizeSlider');
@@ -2219,6 +2241,9 @@ function openConvMenu(event, key) {
     <div class="conv-menu-item" onclick="markConvRead('${key}')">
       <i class="fas fa-check-double"></i> 标记已读（${unread > 99 ? '99+' : unread}）
     </div>` : ''}
+    <div class="conv-menu-item" onclick="toggleConvDnd('${key}')">
+      <i class="fas fa-bell-slash"></i> ${isConvDnd(key) ? '取消免打扰' : '消息免打扰'}
+    </div>
     <div class="conv-menu-item" onclick="clearConvHistoryByKey('${key}')">
       <i class="fas fa-eraser"></i> 清空聊天记录
     </div>
@@ -2951,8 +2976,11 @@ function addMessageTo(chatType, chatId, msg) {
   // 己方发送音效
   if (isSelf(msg.sender) && !msg._noSound) playSendSound();
   
-  // 桌面通知
-  if (appData.settings.desktopNotify && !isSelf(msg.sender)) {
+  // 桌面通知（会话免打扰时不弹）
+  const dndConv = chatType === 'group'
+    ? (appData.groups.find(x => x.id === chatId) || {}).groupDnd
+    : (appData.contacts.find(x => x.id === chatId) || {}).msgDnd;
+  if (appData.settings.desktopNotify && !isSelf(msg.sender) && !dndConv) {
     let notifyName = '新消息';
     if (chatType === 'group') {
       const g = appData.groups.find(x => x.id === chatId);
@@ -3365,14 +3393,21 @@ function generateReply(chatType, chatId, countMin, countMax, wordsPerMsg) {
   const messages = appData.chatRecords[key] || [];
   
   // 获取该会话生效词库（独立词库优先）中所有启用分类的词条
-  const allWords = [];
+  let allWords = [];
   getWordGroupsForKey(chatType, chatId).forEach(g => {
     pushGroupWords(g, allWords);
   });
 
-  if (allWords.length === 0) {
+  // 关键词触发：命中规则就直接回设定好的那句
+  const kwReply = matchKeywordReply(chatType, chatId);
+  if (kwReply) {
+    allWords = [kwReply];
+  } else if (allWords.length === 0) {
     allWords.push('你好', '嗯嗯', '好的', '哈哈', '是的', '没错', '这样啊', '有道理');
   }
+
+  // 记一次使用，供“常用”排序
+  const pickWord = () => { const w = randomPick(allWords); bumpWordUsage(w); return w; };
 
   // 连句模式：多条回复合并为一条，随机符号分隔，看起来像一条消息
   if (appData.settings.multiSentence && count > 1) {
@@ -3386,7 +3421,7 @@ function generateReply(chatType, chatId, countMin, countMax, wordsPerMsg) {
       const parts = [];
       for (let j = 0; j < count; j++) {
         let part = '';
-        for (let k = 0; k < wordsPerMsg; k++) part += randomPick(allWords);
+        for (let k = 0; k < wordsPerMsg; k++) part += pickWord();
         parts.push(part);
       }
       let content = parts[0];
@@ -3412,7 +3447,7 @@ function generateReply(chatType, chatId, countMin, countMax, wordsPerMsg) {
       // 构建消息内容
       let content = '';
       for (let j = 0; j < wordsPerMsg; j++) {
-        content += randomPick(allWords);
+        content += pickWord();
       }
       
       const msg = {
@@ -3454,6 +3489,129 @@ function generateReply(chatType, chatId, countMin, countMax, wordsPerMsg) {
       trackManagedTimeout('aiRpSend', () => aiSendRedPacket(chatType, chatId, aiSender.id), (count + 1) * 1000 + randomInt(500, 2000));
     }
   }
+}
+
+// ==================== 词条统计 / 关键词触发 ====================
+function bumpWordUsage(w) {
+  if (!w) return;
+  if (!appData.wordUsage) appData.wordUsage = {};
+  appData.wordUsage[w] = (appData.wordUsage[w] || 0) + 1;
+  saveData();
+}
+
+function parseKeywordRules() {
+  const raw = appData.settings.keywordRules || '';
+  return raw.split('\n').map(l => l.trim()).filter(Boolean).map(line => {
+    const i = line.indexOf('=>');
+    if (i < 0) return null;
+    const kw = line.slice(0, i).trim();
+    const reply = line.slice(i + 2).trim();
+    return (kw && reply) ? { kw, reply } : null;
+  }).filter(Boolean);
+}
+
+function matchKeywordReply(chatType, chatId) {
+  const rules = parseKeywordRules();
+  if (!rules.length) return '';
+  const key = (chatType === 'group' ? 'group_' : 'contact_') + chatId;
+  const recs = appData.chatRecords[key] || [];
+  const last = [...recs].reverse().find(m => isSelf(m.sender) && m.type === 'text' && m.content);
+  if (!last) return '';
+  const hit = rules.find(r => last.content.includes(r.kw));
+  return hit ? hit.reply : '';
+}
+
+// ==================== 会话免打扰 ====================
+function parseConvKey(key) {
+  if (key.indexOf('group_') === 0) return { type: 'group', id: key.slice(6) };
+  return { type: 'contact', id: key.slice(8) };
+}
+
+function isConvDnd(key) {
+  const p = parseConvKey(key);
+  const item = p.type === 'group'
+    ? appData.groups.find(x => x.id === p.id)
+    : appData.contacts.find(x => x.id === p.id);
+  return !!(item && (p.type === 'group' ? item.groupDnd : item.msgDnd));
+}
+
+function toggleConvDnd(key) {
+  const p = parseConvKey(key);
+  const item = p.type === 'group'
+    ? appData.groups.find(x => x.id === p.id)
+    : appData.contacts.find(x => x.id === p.id);
+  if (!item) return;
+  if (p.type === 'group') item.groupDnd = !item.groupDnd;
+  else item.msgDnd = !item.msgDnd;
+  saveData();
+  closeConvMenu();
+  renderConversations();
+  showToast((p.type === 'group' ? item.groupDnd : item.msgDnd) ? '已开启免打扰' : '已关闭免打扰');
+}
+
+// ==================== 数据备份 ====================
+function exportAllData() {
+  flushSaveData();
+  const data = JSON.stringify(appData, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const d = new Date();
+  const stamp = d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') + '-' + String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0');
+  a.href = url;
+  a.download = '传讯全量备份-' + stamp + '.json';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
+  showToast('已导出');
+}
+
+function restoreAllData(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function () {
+    let d = null;
+    try { d = JSON.parse(reader.result); } catch (e) { showToast('这个文件读不了'); return; }
+    if (!d || typeof d !== 'object' || Array.isArray(d)) { showToast('不是备份文件'); return; }
+    const choice = prompt('恢复哪部分？填数字\n1 全部（覆盖现有）\n2 只恢复聊天记录\n3 只恢复词条库\n4 只恢复设置\n取消就不恢复', '1');
+    if (!choice) return;
+    if (choice === '1') {
+      if (!confirm('会覆盖现在的全部数据，确定？')) return;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(d));
+      location.reload();
+      return;
+    }
+    if (choice === '2') {
+      if (!d.chatRecords) { showToast('备份里没有聊天记录'); return; }
+      appData.chatRecords = d.chatRecords;
+      appData.unreadMap = d.unreadMap || {};
+    } else if (choice === '3') {
+      if (!Array.isArray(d.wordGroups)) { showToast('备份里没有词条库'); return; }
+      appData.wordGroups = d.wordGroups;
+      appData.currentWordGroupId = d.currentWordGroupId || (d.wordGroups[0] && d.wordGroups[0].id) || 'default';
+      if (d.wordUsage) appData.wordUsage = d.wordUsage;
+    } else if (choice === '4') {
+      if (!d.settings) { showToast('备份里没有设置'); return; }
+      appData.settings = Object.assign({}, appData.settings, d.settings);
+    } else {
+      showToast('没这个选项');
+      return;
+    }
+    flushSaveData();
+    showToast('已恢复，正在刷新');
+    setTimeout(function () { location.reload(); }, 600);
+  };
+  reader.readAsText(file);
+}
+
+function showStorageUsage() {
+  flushSaveData();
+  const raw = localStorage.getItem(STORAGE_KEY) || '';
+  const kb = new Blob([raw]).size / 1024;
+  const text = kb > 1024 ? (kb / 1024).toFixed(2) + ' MB' : kb.toFixed(1) + ' KB';
+  showToast('本地占用约 ' + text);
 }
 
 // 【继续】按钮：对方立即主动发言（可连续点击）
@@ -5148,7 +5306,12 @@ function renderLetters() {
   
   list.innerHTML = sorted.map(letter => {
     let statusText, statusClass, extraMeta = '';
-    if (letter.replied) {
+    if (letter.deliverAt && letter.deliverAt > Date.now()) {
+      const leftMin = Math.max(1, Math.round((letter.deliverAt - Date.now()) / 60000));
+      statusText = '在途';
+      statusClass = 'sent';
+      extraMeta = `<span class="letter-eta"><i class="far fa-clock"></i> 约 ${leftMin} 分钟后送达</span>`;
+    } else if (letter.replied) {
       statusText = '已回复';
       statusClass = 'replied';
     } else if (letter.replyAt > Date.now()) {
@@ -5180,6 +5343,7 @@ function renderLetters() {
         <div class="letter-meta">
           <span>${formatFullTime(letter.createdAt)}</span>
           <span>收件人：${escapeHtml(letter.recipient || '未知')}</span>
+          ${letter.readAt ? '<span>· 对方已读</span>' : ''}
           ${extraMeta}
         </div>
       </div>
@@ -5262,6 +5426,7 @@ function sendLetter() {
     title,
     content,
     createdAt: Date.now(),
+    deliverAt: Date.now() + Math.max(0, appData.settings.letterDeliverDelay || 0) * 60 * 1000,
     replyAt: Date.now() + randomInt(delayMin, delayMax) * 60 * 60 * 1000,
     replied: false,
     replyContent: ''
@@ -5330,6 +5495,7 @@ function generateLetterReply(letterId) {
 function openLetterDetail(letterId) {
   const letter = appData.letters.find(l => l.id === letterId);
   if (!letter) return;
+  if (!letter.readAt) { letter.readAt = Date.now(); saveData(); renderLetters(); }
   
   const replyHTML = letter.replied ? `
     <div class="letter-reply">
@@ -5828,6 +5994,7 @@ function getWordDisplayList() {
   if (q) list = list.filter(x => x.w.toLowerCase().includes(q));
   if (wordSortMode === 'asc') list = list.slice().sort((a, b) => a.w.localeCompare(b.w, 'zh'));
   else if (wordSortMode === 'desc') list = list.slice().sort((a, b) => b.w.localeCompare(a.w, 'zh'));
+  else if (wordSortMode === 'freq') list = list.slice().sort((a, b) => ((appData.wordUsage || {})[b.w] || 0) - ((appData.wordUsage || {})[a.w] || 0) || a.w.localeCompare(b.w, 'zh'));
   return list;
 }
 
