@@ -2931,7 +2931,7 @@ function addMessageTo(chatType, chatId, msg) {
   if (isSelf(msg.sender) && !msg._noSound) playSendSound();
   
   // 桌面通知
-  if (appData.settings.desktopNotify && !isSelf(msg.sender)) {
+  if (!isSelf(msg.sender)) {
     let notifyName = '新消息';
     if (chatType === 'group') {
       const g = appData.groups.find(x => x.id === chatId);
@@ -6937,12 +6937,17 @@ function requestNotificationPermission() {
   });
 }
 
+function ntfSay(t){
+  var d=document.getElementById('ntfBar');
+  if(!d){d=document.createElement('div');d.id='ntfBar';d.style.cssText='position:fixed;left:0;right:0;top:0;z-index:99999;background:rgba(0,140,0,.95);color:#fff;font-size:12px;line-height:18px;padding:4px 8px;font-family:monospace;white-space:nowrap;overflow:hidden;';document.body.appendChild(d);}
+  d.textContent=t;
+}
 function showNotification(title, body, options) {
   options = options || {};
-  if (!('Notification' in window)) return;
-  if (Notification.permission !== 'granted') return;
-  if (!options.force && document.visibilityState === 'visible') return;
-
+  if (!('Notification' in window)) { ntfSay('无 Notification'); return; }
+  if (Notification.permission !== 'granted') { ntfSay('权限=' + Notification.permission); return; }
+  if (!options.force && document.visibilityState === 'visible') { ntfSay('前台跳过'); return; }
+  ntfSay('发: ' + (options.tag || 'chat-app'));
   const tag = options.tag || 'chat-app';
 
   let clickId = null;
@@ -6961,6 +6966,7 @@ function showNotification(title, body, options) {
   };
 
   const fallback = function () {
+    ntfSay('SW发不出去，走兜底');
     try {
       const n = new Notification(title, opt);
       n.onclick = function () {
@@ -6974,7 +6980,7 @@ function showNotification(title, body, options) {
 
   registerNotificationWorker().then(function (reg) {
     if (reg && typeof reg.showNotification === 'function') {
-      return reg.showNotification(title, opt).catch(fallback);
+      return reg.showNotification(title, opt).then(function(){ ntfSay('已发: ' + tag); }).catch(fallback);
     }
     throw new Error('no sw');
   }).catch(fallback);
