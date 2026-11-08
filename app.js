@@ -3610,6 +3610,10 @@ function restoreAllData(input) {
 }
 
 // ==================== 音乐播放器 ====================
+function musicApiUrl(id, type) {
+  return 'https://api.injahow.cn/meting/?server=netease&type=' + type + '&id=' + encodeURIComponent(id);
+}
+
 function parseNeteaseId(raw) {
   if (!raw) return '';
   const m = raw.match(/[?&#]id=(\d+)/) || raw.match(/song\/(\d+)/) || raw.match(/^\s*(\d{5,})\s*$/);
@@ -3631,24 +3635,61 @@ function addMusicFromInput() {
   if (!raw) return;
   const id = parseNeteaseId(raw);
   if (!id) { showToast('没认出歌曲ID，复制带 id= 的链接'); return; }
-  const lines = raw.split('\n').map(s => s.trim()).filter(Boolean);
   let name = '';
-  const first = lines[0] || '';
-  if (first && !/^https?:/.test(first) && !/^\d+$/.test(first)) name = first.slice(0, 40);
-  if (!name) name = '网易云 ' + id;
+  const quoted = raw.match(/《([^》]+)》/);
+  if (quoted) name = quoted[1].trim();
   if (!Array.isArray(appData.music)) appData.music = [];
-  appData.music.unshift({ id, name, addedAt: Date.now() });
+  const exist = appData.music.find(m => m.id === id);
+  if (!exist) {
+    appData.music.unshift({ id, name: name || '载入中…', addedAt: Date.now() });
+  }
   el.value = '';
   saveData();
   playMusic(id);
-  showToast('已加入');
+  fetchMusicInfo(id);
+  setTimeout(function () {
+    const m = (appData.music || []).find(x => x.id === id);
+    if (m && m.name === '载入中…') { m.name = '网易云 ' + id; saveData(); renderMusicList(); }
+  }, 4000);
+}
+
+function fetchMusicInfo(id) {
+  fetch(musicApiUrl(id, 'song')).then(r => r.json()).then(list => {
+    const info = Array.isArray(list) ? list[0] : list;
+    if (!info || !info.name) return;
+    const m = (appData.music || []).find(x => x.id === id);
+    if (!m) return;
+    m.name = info.name + (info.artist ? ' - ' + info.artist : '');
+    saveData();
+    renderMusicList();
+  }).catch(() => {});
 }
 
 function playMusic(id) {
   const box = document.getElementById('musicPlayerBox');
   if (!box || !id) return;
-  box.innerHTML = '<iframe src="https://music.163.com/outchain/player?type=2&id=' + encodeURIComponent(id) + '&auto=1&height=66" width="100%" height="66" frameborder="no" style="border:0;display:block;"></iframe>';
+  box.innerHTML = '<div style="padding:8px 10px 2px;">'
+    + '<audio id="musicAudio" controls preload="none" style="width:100%;height:36px;" '
+    + 'src="' + musicApiUrl(id, 'url') + '" '
+    + '></audio>'
+    + '<div style="font-size:11px;color:var(--text-tertiary);padding:4px 2px 0;">播放不了就去网易云搜歌名</div></div>';
   appData.currentMusicId = id;
+  saveData();
+  renderMusicList();
+  const au = document.getElementById('musicAudio');
+  if (au) {
+    au.addEventListener('error', function () { showToast('这首歌播不了，换一首试试'); });
+    const pr = au.play();
+    if (pr && pr.catch) pr.catch(function () {});
+  }
+}
+
+function renameMusic(id) {
+  const m = (appData.music || []).find(x => x.id === id);
+  if (!m) return;
+  const v = prompt('歌名', m.name || '');
+  if (v === null) return;
+  m.name = v.trim() || m.name;
   saveData();
   renderMusicList();
 }
@@ -3664,17 +3705,24 @@ function removeMusic(index) {
 function renderMusicList() {
   const list = document.getElementById('musicList');
   if (!list) return;
+  if (Array.isArray(appData.music)) {
+    appData.music.forEach(m => {
+      if (!m.tried && /^网易云 \d+$/.test(m.name || '')) { m.tried = true; fetchMusicInfo(m.id); }
+    });
+  }
   if (!Array.isArray(appData.music) || appData.music.length === 0) {
     list.innerHTML = '<div style="font-size:12px;color:var(--text-tertiary);padding:6px 0;">还没歌。贴个链接吧</div>';
     return;
   }
   list.innerHTML = appData.music.map((m, i) => {
     const active = m.id === appData.currentMusicId;
-    const color = active ? 'color:var(--accent-color,#3a7bd5);' : '';
-    return `<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-top:1px solid var(--border-color);">`
-      + `<span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${color}">${escapeHtml(m.name)}</span>`
-      + `<button class="btn btn-secondary" style="padding:4px 8px;font-size:11px;" onclick="playMusic('${m.id}')">播放</button>`
-      + `<button class="btn btn-danger" style="padding:4px 8px;font-size:11px;" onclick="removeMusic(${i})">删</button>`
+    const color = active ? 'color:var(--accent-color,#3a7bd5);font-weight:600;' : '';
+    const playIcon = active ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-play"></i>';
+    return `<div style="display:flex;align-items:center;gap:4px;padding:7px 0;border-top:1px solid var(--border-color);">`
+      + `<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${color}" onclick="playMusic('${m.id}')">${escapeHtml(m.name)}</span>`
+      + `<button class="btn btn-secondary" style="padding:3px 7px;font-size:11px;" onclick="playMusic('${m.id}')">${playIcon}</button>`
+      + `<button class="btn btn-secondary" style="padding:3px 7px;font-size:11px;" onclick="renameMusic('${m.id}')">名</button>`
+      + `<button class="btn btn-danger" style="padding:3px 7px;font-size:11px;" onclick="removeMusic(${i})">删</button>`
       + `</div>`;
   }).join('');
 }
