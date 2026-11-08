@@ -1224,6 +1224,21 @@
 <div class="toast" id="toast"></div>
 
 
-<script src="app.js?v=18"></script>
+<!-- 音乐悬浮按钮 -->
+<div id="musicFab" onclick="toggleMusicPanel()" title="音乐" style="position:fixed;right:14px;bottom:78px;z-index:9000;width:44px;height:44px;border-radius:50%;background:#3a7bd5;color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 14px rgba(0,0,0,.25);cursor:pointer;font-size:16px;"><i class="fas fa-music"></i></div>
+<div id="musicPanel" style="display:none;position:fixed;right:12px;bottom:130px;width:min(330px,calc(100vw - 24px));background:var(--bg-secondary,#fff);border:1px solid var(--border-color,#ddd);border-radius:14px;box-shadow:0 8px 30px rgba(0,0,0,.25);z-index:9000;overflow:hidden;">
+  <div style="padding:9px 12px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-color,#eee);">
+    <div style="font-size:13px;font-weight:600;">音乐</div>
+    <div onclick="toggleMusicPanel()" style="cursor:pointer;padding:2px 6px;color:var(--text-secondary,#888);">&#10005;</div>
+  </div>
+  <div id="musicPlayerBox" style="font-size:0;"></div>
+  <div style="display:flex;gap:6px;padding:8px 10px;">
+    <input id="musicInput" class="input" placeholder="粘贴网易云链接或歌曲ID" style="flex:1;font-size:12px;padding:7px 9px;min-width:0;">
+    <button class="btn btn-primary" style="padding:7px 10px;font-size:12px;" onclick="addMusicFromInput()">加</button>
+  </div>
+  <div id="musicList" style="max-height:170px;overflow:auto;padding:0 10px 10px;"></div>
+</div>
+
+<script src="app.js?v=19"></script>
 </body>
 </html>

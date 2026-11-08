@@ -110,6 +110,8 @@ const defaultAppData = {
   favorites: [],
   // ===== 会话输入草稿 =====
   chatDrafts: {},
+  music: [],
+  currentMusicId: '',
   pinnedConversations: {}, // 会话置顶 { 'contact_xxx' | 'group_xxx': true }
   surveyTemplates: {},
   surveyLibrary: {},
@@ -496,6 +498,7 @@ function applyTheme() {
   });
   
   // 应用消息字体大小
+  renderMusicList();
   const kwInputEl = document.getElementById('keywordRulesInput');
   if (kwInputEl) kwInputEl.value = appData.settings.keywordRules || '';
   const ldDelayEl = document.getElementById('letterDeliverDelay');
@@ -3604,6 +3607,76 @@ function restoreAllData(input) {
     setTimeout(function () { location.reload(); }, 600);
   };
   reader.readAsText(file);
+}
+
+// ==================== 音乐播放器 ====================
+function parseNeteaseId(raw) {
+  if (!raw) return '';
+  const m = raw.match(/[?&#]id=(\d+)/) || raw.match(/song\/(\d+)/) || raw.match(/^\s*(\d{5,})\s*$/);
+  return m ? m[1] : '';
+}
+
+function toggleMusicPanel() {
+  const panel = document.getElementById('musicPanel');
+  if (!panel) return;
+  const open = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
+  if (!open) renderMusicList();
+}
+
+function addMusicFromInput() {
+  const el = document.getElementById('musicInput');
+  if (!el) return;
+  const raw = (el.value || '').trim();
+  if (!raw) return;
+  const id = parseNeteaseId(raw);
+  if (!id) { showToast('没认出歌曲ID，复制带 id= 的链接'); return; }
+  const lines = raw.split('\n').map(s => s.trim()).filter(Boolean);
+  let name = '';
+  const first = lines[0] || '';
+  if (first && !/^https?:/.test(first) && !/^\d+$/.test(first)) name = first.slice(0, 40);
+  if (!name) name = '网易云 ' + id;
+  if (!Array.isArray(appData.music)) appData.music = [];
+  appData.music.unshift({ id, name, addedAt: Date.now() });
+  el.value = '';
+  saveData();
+  playMusic(id);
+  showToast('已加入');
+}
+
+function playMusic(id) {
+  const box = document.getElementById('musicPlayerBox');
+  if (!box || !id) return;
+  box.innerHTML = '<iframe src="https://music.163.com/outchain/player?type=2&id=' + encodeURIComponent(id) + '&auto=1&height=66" width="100%" height="66" frameborder="no" style="border:0;display:block;"></iframe>';
+  appData.currentMusicId = id;
+  saveData();
+  renderMusicList();
+}
+
+function removeMusic(index) {
+  if (!Array.isArray(appData.music)) return;
+  appData.music.splice(index, 1);
+  saveData();
+  renderMusicList();
+  showToast('已删除');
+}
+
+function renderMusicList() {
+  const list = document.getElementById('musicList');
+  if (!list) return;
+  if (!Array.isArray(appData.music) || appData.music.length === 0) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--text-tertiary);padding:6px 0;">还没歌。贴个链接吧</div>';
+    return;
+  }
+  list.innerHTML = appData.music.map((m, i) => {
+    const active = m.id === appData.currentMusicId;
+    const color = active ? 'color:var(--accent-color,#3a7bd5);' : '';
+    return `<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-top:1px solid var(--border-color);">`
+      + `<span style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${color}">${escapeHtml(m.name)}</span>`
+      + `<button class="btn btn-secondary" style="padding:4px 8px;font-size:11px;" onclick="playMusic('${m.id}')">播放</button>`
+      + `<button class="btn btn-danger" style="padding:4px 8px;font-size:11px;" onclick="removeMusic(${i})">删</button>`
+      + `</div>`;
+  }).join('');
 }
 
 function showStorageUsage() {
