@@ -1382,13 +1382,19 @@ function initToggles() {
     }
   });
   
-  document.getElementById('desktopNotifyToggle').addEventListener('click', function() {
-    appData.settings.desktopNotify = !appData.settings.desktopNotify;
-    this.classList.toggle('active', appData.settings.desktopNotify);
-    saveData();
+  document.getElementById('desktopNotifyToggle').addEventListener('click', function () {
+    const el = this;
     if (appData.settings.desktopNotify) {
-      requestNotificationPermission();
+      appData.settings.desktopNotify = false;
+      el.classList.remove('active');
+      saveData();
+      return;
     }
+    requestNotificationPermission().then(function (granted) {
+      appData.settings.desktopNotify = !!granted;
+      el.classList.toggle('active', !!granted);
+      saveData();
+    });
   });
   
   // 初始回填开关状态
@@ -2925,7 +2931,7 @@ function addMessageTo(chatType, chatId, msg) {
   if (isSelf(msg.sender) && !msg._noSound) playSendSound();
   
   // 桌面通知
-  if (appData.settings.desktopNotify && !isSelf(msg.sender)) {
+  if (appData.settings.desktopNotify && !isSelf(msg.sender) && !isViewing) {
     let notifyName = '新消息';
     if (chatType === 'group') {
       const g = appData.groups.find(x => x.id === chatId);
@@ -6883,54 +6889,121 @@ function triggerIncomingCall() {
 }
 
 // ==================== 桌面通知 ====================
+let swRegisterPromise = null;
+const _notifyClickHandlers = {};
+let _notifyClickSeq = 0;
+
 function registerNotificationWorker() {
   if (!('serviceWorker' in navigator)) return Promise.resolve(null);
-  return navigator.serviceWorker.register('sw.js').then(function () { return navigator.serviceWorker.ready; }).catch(function () { return null; });
+  if (swRegisterPromise) return swRegisterPromise;
+  swRegisterPromise = navigator.serviceWorker.register('sw.js')
+    .then(function (reg) {
+      return Promise.race([
+        navigator.serviceWorker.ready,
+        new Promise(function (resolve) {
+          setTimeout(function () { resolve(reg.active ? reg : null); }, 1500);
+        })
+      ]);
+    })
+    .catch(function () {
+      swRegisterPromise = null;
+      return null;
+    });
+  return swRegisterPromise;
 }
 
 function requestNotificationPermission() {
-  if (!('Notification' in window)) { showToast('这个浏览器不支持通知'); return; }
-  if (Notification.permission === 'granted') { registerNotificationWorker(); return; }
-  if (Notification.permission === 'denied') { showToast('通知被拦了，去浏览器设置里放开'); return; }
-  Notification.requestPermission().then(function (p) {
-    if (p === 'granted') { registerNotificationWorker(); showToast('通知开了'); }
-    else { showToast('没给权限，弹不出来'); }
+  return new Promise(function (resolve) {
+    if (!('Notification' in window)) { showToast('这个浏览器不支持通知'); return resolve(false); }
+    if (Notification.permission === 'granted') { registerNotificationWorker(); return resolve(true); }
+    if (Notification.permission === 'denied') { showToast('通知被拦了，去浏览器站点设置里放开'); return resolve(false); }
+    let settled = false;
+    const done = function (perm) {
+      if (settled) return;
+      settled = true;
+      if (perm === 'granted') {
+        registerNotificationWorker();
+        showToast('通知开了');
+        resolve(true);
+      } else {
+        showToast('没给权限，弹不出来');
+        resolve(false);
+      }
+    };
+    try {
+      const p = Notification.requestPermission(done);
+      if (p && typeof p.then === 'function') p.then(done);
+    } catch (e) { resolve(false); }
   });
 }
 
 function showNotification(title, body, options) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  if (document.visibilityState === 'visible') return;
-  var opt = { body: body || '', tag: ((options && options.tag) || 'chat-app') + '-' + Date.now(), renotify: true, silent: true, data: { url: location.href } };
-  var getting = (typeof registerNotificationWorker === 'function') ? registerNotificationWorker() : (('serviceWorker' in navigator) ? navigator.serviceWorker.getRegistration() : Promise.resolve(null));
-  Promise.resolve(getting).then(function (r) {
-    if (r && r.showNotification) return r.showNotification(title, opt);
-    throw new Error('no sw');
-  }).catch(function () {
+  options = options || {};
+  if (!('Notification' in window)) return;
+  if (Notification.permission !== 'granted') return;
+  if (!options.force && document.visibilityState === 'visible') return;
+
+  const tag = options.tag || 'chat-app';
+
+  let clickId = null;
+  if (typeof options.onClick === 'function') {
+    clickId = ++_notifyClickSeq;
+    _notifyClickHandlers[clickId] = options.onClick;
+    setTimeout(function () { delete _notifyClickHandlers[clickId]; }, 30000);
+  }
+
+  const opt = {
+    body: body || '',
+    tag: tag,
+    renotify: true,
+    silent: false,
+    data: { url: location.href, clickId: clickId }
+  };
+
+  const fallback = function () {
     try {
-      var n = new Notification(title, opt);
+      const n = new Notification(title, opt);
       n.onclick = function () {
         try { window.focus(); } catch (e) {}
-        if (options && typeof options.onClick === 'function') options.onClick();
+        if (typeof options.onClick === 'function') options.onClick();
         n.close();
       };
-      setTimeout(function () { n.close(); }, 6000);
+      setTimeout(function () { n.close(); }, 8000);
     } catch (e) {}
+  };
+
+  registerNotificationWorker().then(function (reg) {
+    if (reg && typeof reg.showNotification === 'function') {
+      return reg.showNotification(title, opt).catch(fallback);
+    }
+    throw new Error('no sw');
+  }).catch(fallback);
+}
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', function (event) {
+    const d = event.data;
+    if (!d || d.type !== 'notification-click') return;
+    const id = d.data && d.data.clickId;
+    const fn = id && _notifyClickHandlers[id];
+    if (fn) {
+      try { fn(); } catch (e) {}
+      delete _notifyClickHandlers[id];
+    }
   });
 }
 
 function testDesktopNotification() {
-  if (!('Notification' in window)) { showToast('浏览器不支持'); return; }
-  if (Notification.permission !== 'granted') { requestNotificationPermission(); showToast('先给权限，再点一次'); return; }
-  registerNotificationWorker().then(function () {
-    var opt = { body: '能弹出来，就说明通了。', tag: 'test', data: { url: location.href } };
-    var getting = ('serviceWorker' in navigator) ? navigator.serviceWorker.getRegistration() : Promise.resolve(null);
-    Promise.resolve(getting).then(function (r) {
-      if (r && r.showNotification) return r.showNotification('亓砚池', opt);
-      new Notification('亓砚池', opt);
-    }).catch(function () { try { new Notification('亓砚池', opt); } catch (e) {} });
-    showToast('发了，看通知栏');
-  });
+  if (!('Notification' in window)) { showToast('浏览器不支持通知'); return; }
+  if (Notification.permission === 'denied') { showToast('通知被浏览器拦了，去站点设置里放开'); return; }
+  if (Notification.permission !== 'granted') {
+    requestNotificationPermission().then(function (granted) {
+      if (granted) showNotification('Vislta 测试通知', '能弹出来就说明通了。', { tag: 'test', force: true });
+    });
+    return;
+  }
+  showNotification('Vislta 测试通知', '能弹出来就说明通了。', { tag: 'test', force: true });
+  showToast('发了，看通知栏');
 }
 
 // ==================== 应用内通知预览 ====================
@@ -9827,4 +9900,20 @@ function init() {
 // 启动
 init();
 
-if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); }); }
+if ('serviceWorker' in navigator) { window.addEventListener('load', function () { registerNotificationWorker(); }); }
+
+// 通知状态矫正：开了却没权限就回弹，开了有权限就重新注册
+setTimeout(function () {
+  try {
+    const dn = document.getElementById('desktopNotifyToggle');
+    if (!('Notification' in window)) return;
+    if (appData.settings.desktopNotify && Notification.permission !== 'granted') {
+      appData.settings.desktopNotify = false;
+      saveData();
+      if (dn) dn.classList.remove('active');
+    } else if (appData.settings.desktopNotify) {
+      registerNotificationWorker();
+      if (dn) dn.classList.add('active');
+    }
+  } catch (e) {}
+}, 800);

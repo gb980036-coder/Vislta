@@ -1,10 +1,19 @@
-self.addEventListener('install', function (e) { self.skipWaiting(); });
+self.addEventListener('install', function () { self.skipWaiting(); });
 self.addEventListener('activate', function (e) { e.waitUntil(self.clients.claim()); });
-self.addEventListener('notificationclick', function (e) {
-  e.notification.close();
-  var url = (e.notification.data && e.notification.data.url) || './';
-  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
-    for (var i = 0; i < list.length; i++) { var c = list[i]; if ('focus' in c) { c.focus(); return; } }
-    if (clients.openWindow) return clients.openWindow(url);
+
+self.addEventListener('notificationclick', function (event) {
+  event.notification.close();
+  var data = event.notification.data || {};
+  var target = data.url || (self.location.origin + '/');
+  event.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i];
+      if (c.url.split('#')[0] === target.split('#')[0] && 'focus' in c) {
+        return c.focus().then(function () {
+          try { c.postMessage({ type: 'notification-click', data: data }); } catch (e) {}
+        });
+      }
+    }
+    if (clients.openWindow) return clients.openWindow(target);
   }));
 });
