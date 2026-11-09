@@ -3618,6 +3618,10 @@ function restoreAllData(input) {
 }
 
 // ==================== 音乐播放器 ====================
+function musicStreamUrl(id) {
+  return 'https://music.163.com/song/media/outer/url?id=' + encodeURIComponent(id) + '.mp3';
+}
+
 function musicApiUrl(id, type) {
   return 'https://api.injahow.cn/meting/?server=netease&type=' + type + '&id=' + encodeURIComponent(id);
 }
@@ -3718,13 +3722,55 @@ function deleteMusicList() {
   showToast('已删除');
 }
 
+function collectSongIds(text) {
+  const out = [];
+  const seen = {};
+  const re = /(\d{5,})/g;
+  let m;
+  while ((m = re.exec(String(text || '')))) {
+    const id = m[1];
+    if (seen[id]) continue;
+    seen[id] = 1;
+    out.push(id);
+  }
+  return out;
+}
+
+function addSongsByIds(ids) {
+  const list = getCurrentList();
+  if (!Array.isArray(list.songs)) list.songs = [];
+  let added = 0;
+  ids.forEach(function (id) {
+    if (list.songs.some(function (s) { return s.id === id; })) return;
+    list.songs.push({ id: id, name: '网易云 ' + id, artist: '', addedAt: Date.now() });
+    added++;
+  });
+  saveData();
+  renderMusicList();
+  renderMusicListSelect();
+  showToast(added ? ('导入 ' + added + ' 首，开始查') : '都已在歌单里');
+  if (added) probeList(list, 4);
+}
+
 function importPlaylistPrompt() {
-  const raw = prompt('粘贴网易云歌单链接，或直接填歌单ID');
+  const raw = prompt('粘贴网易云歌单链接，或直接填歌单ID\n也可以一行一个歌曲链接/歌曲ID，批量导入');
   if (!raw) return;
+  const isListLink = /playlist|toplist|歌单/i.test(raw);
+  if (!isListLink) {
+    const quick = collectSongIds(raw);
+    if (quick.length >= 2 || (quick.length === 1 && raw.indexOf('\n') >= 0)) {
+      addSongsByIds(quick);
+      return;
+    }
+  }
   const pid = parsePlaylistId(raw);
   if (!pid) { showToast('没认出歌单ID'); return; }
   showToast('正在拉歌单…');
-  fetch('https://api.injahow.cn/meting/?server=netease&type=playlist&id=' + encodeURIComponent(pid)).then(function (r) { return r.json(); }).then(function (arr) {
+  fetch(musicApiUrl(pid, 'playlist')).then(function (r) { return r.json(); }).then(function (arr) {
+    if (arr && !Array.isArray(arr) && arr.message) {
+      showToast('接口今天的额度用完了，明天再导。也可以一行贴一首歌的链接批量加');
+      return;
+    }
     if (!Array.isArray(arr) || arr.length === 0) { showToast('歌单是空的或抓不到'); return; }
     const list = getCurrentList();
     if (!Array.isArray(list.songs)) list.songs = [];
@@ -3800,7 +3846,7 @@ function probeOne(id) {
     a.onloadedmetadata = function () { fin(true); };
     a.oncanplay = function () { fin(true); };
     a.onerror = function () { fin(false); };
-    a.src = musicApiUrl(id, 'url');
+    a.src = musicStreamUrl(id);
   });
 }
 
@@ -3943,7 +3989,7 @@ function playMusic(id) {
   if (!box || !id) return;
   appData.currentMusicId = id;
   updateMusicHero();
-  box.innerHTML = '<audio id="musicAudio" preload="none" src="' + musicApiUrl(id, 'url') + '"></audio>';
+  box.innerHTML = '<audio id="musicAudio" preload="none" src="' + musicStreamUrl(id) + '"></audio>';
   const au = document.getElementById('musicAudio');
   if (au) {
     au.addEventListener('timeupdate', updateMusicProgress);
