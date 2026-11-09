@@ -7,6 +7,11 @@
 <link rel="stylesheet" href="https://fastly.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.1/css/all.min.css">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="perf.css">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#3a7bd5">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Vislta">
 </head>
 <body>
 <!-- Vislta 开场动画遮罩（~2.6s 后自动淡出并由 JS 移除） -->
@@ -181,6 +186,17 @@
     <!-- 设置页面 -->
     <div class="page" id="settingsPage">
       <div class="settings-list" id="settingsList">
+      <div class="settings-group">
+        <div class="settings-group-title">显示</div>
+        <div class="setting-item" onclick="toggleFullscreen()">
+          <div class="setting-icon"><i class="fas fa-expand"></i></div>
+          <div class="setting-content">
+            <div class="setting-label">全屏模式</div>
+            <div class="setting-desc">去掉浏览器栏。加到主屏启动时也是全屏</div>
+          </div>
+          <div class="setting-value" id="fullscreenState" style="font-size:12px;color:var(--text-tertiary);">关</div>
+        </div>
+      </div>
         <!-- 头像设置 -->
         <div class="settings-group">
           <div class="settings-group-title">个人设置</div>
@@ -1267,6 +1283,6 @@
   <div id="musicList" style="flex:1 1 auto;overflow:auto;padding:0 16px 14px;"></div>
 </div>
 
-<script src="app.js?v=22"></script>
+<script src="app.js?v=23"></script>
 </body>
 </html>

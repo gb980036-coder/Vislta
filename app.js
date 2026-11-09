@@ -504,6 +504,7 @@ function applyTheme() {
   // 应用消息字体大小
   renderMusicList();
   initMusicFab();
+  updateFullscreenState();
   const kwInputEl = document.getElementById('keywordRulesInput');
   if (kwInputEl) kwInputEl.value = appData.settings.keywordRules || '';
   const ldDelayEl = document.getElementById('letterDeliverDelay');
@@ -3898,6 +3899,37 @@ function renderMusicList() {
       + '</div>';
   }).join('');
 }
+
+function toggleFullscreen() {
+  const el = document.documentElement;
+  const isFs = document.fullscreenElement || document.webkitFullscreenElement;
+  if (!isFs) {
+    const req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!req) { showToast('这个浏览器不支持，加到主屏试试'); return; }
+    try {
+      const pr = req.call(el);
+      if (pr && pr.catch) pr.catch(function () { showToast('没成功，可能被浏览器拦了'); });
+    } catch (e) { showToast('没成功'); }
+  } else {
+    const ex = document.exitFullscreen || document.webkitExitFullscreen;
+    if (ex) { try { ex.call(document); } catch (e) {} }
+  }
+}
+
+function updateFullscreenState() {
+  const el = document.getElementById('fullscreenState');
+  if (!el) return;
+  const on = !!(document.fullscreenElement || document.webkitFullscreenElement);
+  el.textContent = on ? '开' : '关';
+  const item = el.closest ? el.closest('.setting-item') : null;
+  if (item) {
+    const icon = item.querySelector('.setting-icon i');
+    if (icon) icon.className = 'fas fa-' + (on ? 'compress' : 'expand');
+  }
+}
+
+document.addEventListener('fullscreenchange', updateFullscreenState);
+document.addEventListener('webkitfullscreenchange', updateFullscreenState);
 
 function showStorageUsage() {
   flushSaveData();
