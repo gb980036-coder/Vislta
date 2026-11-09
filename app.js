@@ -3810,6 +3810,8 @@ function openMusicSheet() {
   const mask = document.getElementById('musicMask');
   if (!panel) return;
   try { renderMusicListSelect(); renderMusicList(); } catch (e) { console.error('音乐列表渲染失败', e); }
+  const curAu = document.getElementById('musicAudio');
+  setMusicPlayIcon(!!curAu && !curAu.paused);
   if (mask) mask.style.display = 'block';
   panel.style.transform = 'translate(-50%,0)';
   const fab = document.getElementById('musicFab');
@@ -3927,9 +3929,11 @@ function playMusic(id) {
   if (au) {
     au.addEventListener('timeupdate', updateMusicProgress);
     au.addEventListener('loadedmetadata', updateMusicProgress);
-    au.addEventListener('play', function () { setMusicPlayIcon(true); });
-    au.addEventListener('pause', function () { setMusicPlayIcon(false); });
-    au.addEventListener('ended', musicNext);
+    const isCur = function () { return document.getElementById('musicAudio') === au; };
+    au.addEventListener('play', function () { if (isCur()) setMusicPlayIcon(true); });
+    au.addEventListener('playing', function () { if (isCur()) setMusicPlayIcon(true); });
+    au.addEventListener('pause', function () { if (isCur()) setMusicPlayIcon(false); });
+    au.addEventListener('ended', function () { if (isCur()) musicNext(); });
     au.addEventListener('error', function () {
       setMusicPlayIcon(false);
       const songs = getCurrentSongs();
@@ -3938,7 +3942,8 @@ function playMusic(id) {
       showToast('这首放不了，已标记');
     });
     const pr = au.play();
-    if (pr && pr.catch) pr.catch(function () {});
+    if (pr && pr.catch) pr.catch(function () { if (isCur()) setMusicPlayIcon(false); });
+    setMusicPlayIcon(true);
   }
   saveData();
   renderMusicList();
@@ -3953,6 +3958,7 @@ function toggleMusicPlay() {
   } else {
     au.pause();
   }
+  setMusicPlayIcon(!au.paused);
 }
 
 function musicStep(delta) {
