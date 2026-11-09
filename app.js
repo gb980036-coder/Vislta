@@ -3620,11 +3620,11 @@ function restoreAllData(input) {
 
 // ==================== 音乐播放器 ====================
 function musicStreamUrl(id) {
-  return 'https://music.163.com/song/media/outer/url?id=' + encodeURIComponent(id) + '.mp3';
+  return 'https://api.qijieya.cn/meting/?server=netease&type=url&id=' + encodeURIComponent(id);
 }
 
 function musicApiUrl(id, type) {
-  return 'https://api.injahow.cn/meting/?server=netease&type=' + type + '&id=' + encodeURIComponent(id);
+  return 'https://api.qijieya.cn/meting/?server=netease&type=' + (type || 'url') + '&id=' + encodeURIComponent(id);
 }
 
 function parseNeteaseId(raw) {
