@@ -71,6 +71,8 @@ const defaultAppData = {
     keepAlive: true,
     timedMsgEnabled: false,
     keywordRules: '',
+    musicFabHidden: false,
+    musicFabPos: null,
     letterDeliverDelay: 0,
     timedMsgInterval: 30,
     // ===== 铃声与音效 =====
@@ -223,6 +225,8 @@ function loadData() {
   if (typeof s.soundVolume !== 'number' || s.soundVolume < 0 || s.soundVolume > 100) s.soundVolume = 80;
   if (!s.ringtoneCall) s.ringtoneCall = 'call_classic';
   if (typeof s.keywordRules !== 'string') s.keywordRules = '';
+  if (typeof s.musicFabHidden !== 'boolean') s.musicFabHidden = false;
+  if (!('musicFabPos' in s)) s.musicFabPos = null;
   if (typeof s.letterDeliverDelay !== 'number') s.letterDeliverDelay = 0;
   if (!s.ringtoneMsg) s.ringtoneMsg = 'msg_default';
   if (!s.ringtoneGroup) s.ringtoneGroup = 'grp_default';
@@ -499,6 +503,7 @@ function applyTheme() {
   
   // 应用消息字体大小
   renderMusicList();
+  initMusicFab();
   const kwInputEl = document.getElementById('keywordRulesInput');
   if (kwInputEl) kwInputEl.value = appData.settings.keywordRules || '';
   const ldDelayEl = document.getElementById('letterDeliverDelay');
@@ -3610,6 +3615,88 @@ function restoreAllData(input) {
 }
 
 // ==================== 音乐播放器 ====================
+function initMusicFab() {
+  const fab = document.getElementById('musicFab');
+  if (!fab) return;
+  if (appData.settings.musicFabHidden) fab.style.display = 'none';
+  const pos = appData.settings.musicFabPos;
+  if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
+    const w = 38, h = 38;
+    const x = Math.max(4, Math.min(window.innerWidth - w - 4, pos.x));
+    const y = Math.max(4, Math.min(window.innerHeight - h - 4, pos.y));
+    fab.style.left = x + 'px';
+    fab.style.top = y + 'px';
+    fab.style.right = 'auto';
+    fab.style.bottom = 'auto';
+  }
+  let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false, moved = false, justDragged = false;
+  fab.addEventListener('pointerdown', function (e) {
+    if (e.button && e.button !== 0) return;
+    const r = fab.getBoundingClientRect();
+    sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
+    moved = false; dragging = true;
+    try { fab.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+  fab.addEventListener('pointermove', function (e) {
+    if (!dragging) return;
+    const dx = e.clientX - sx, dy = e.clientY - sy;
+    if (!moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    moved = true;
+    const w = fab.offsetWidth || 38, h = fab.offsetHeight || 38;
+    const x = Math.max(4, Math.min(window.innerWidth - w - 4, ox + dx));
+    const y = Math.max(4, Math.min(window.innerHeight - h - 4, oy + dy));
+    fab.style.left = x + 'px';
+    fab.style.top = y + 'px';
+    fab.style.right = 'auto';
+    fab.style.bottom = 'auto';
+  });
+  fab.addEventListener('pointerup', function () {
+    if (!dragging) return;
+    dragging = false;
+    if (!moved) return;
+    justDragged = true;
+    const r = fab.getBoundingClientRect();
+    appData.settings.musicFabPos = { x: Math.round(r.left), y: Math.round(r.top) };
+    saveData();
+  });
+  fab.addEventListener('click', function (e) {
+    if (justDragged) { justDragged = false; e.preventDefault(); e.stopPropagation(); return; }
+    toggleMusicPanel();
+  });
+}
+
+function hideMusicFab() {
+  const fab = document.getElementById('musicFab');
+  if (!fab) return;
+  if (!confirm('隐藏这个按钮？以后在 设置-数据备份 里点“显示音乐按钮”就能找回来')) return;
+  fab.style.display = 'none';
+  appData.settings.musicFabHidden = true;
+  saveData();
+  closeMusicSheet();
+  showToast('已隐藏');
+}
+
+function showMusicFab() {
+  const fab = document.getElementById('musicFab');
+  if (fab) fab.style.display = 'flex';
+  appData.settings.musicFabHidden = false;
+  saveData();
+  showToast('已显示');
+}
+
+function resetMusicFabPos() {
+  const fab = document.getElementById('musicFab');
+  if (!fab) return;
+  fab.style.left = '';
+  fab.style.top = '';
+  fab.style.right = '12px';
+  fab.style.bottom = '84px';
+  appData.settings.musicFabPos = null;
+  saveData();
+  showToast('位置已复位');
+}
+
+
 function musicApiUrl(id, type) {
   return 'https://api.injahow.cn/meting/?server=netease&type=' + type + '&id=' + encodeURIComponent(id);
 }
