@@ -3619,8 +3619,15 @@ function restoreAllData(input) {
 }
 
 // ==================== 音乐播放器 ====================
-function musicStreamUrl(id) {
-  return 'https://api.qijieya.cn/meting/?server=netease&type=url&id=' + encodeURIComponent(id);
+const MUSIC_SOURCES = [
+  { name: '源1', base: 'https://api.qijieya.cn/meting/?server=netease&type=url&id=', tail: '' },
+  { name: '源2', base: 'https://api.injahow.cn/meting/?server=netease&type=url&id=', tail: '' },
+  { name: '源3', base: 'https://music.163.com/song/media/outer/url?id=', tail: '.mp3' }
+];
+
+function musicStreamUrl(id, idx) {
+  const s = MUSIC_SOURCES[idx || 0] || MUSIC_SOURCES[0];
+  return s.base + encodeURIComponent(id) + (s.tail || '');
 }
 
 function musicApiUrl(id, type) {
@@ -3895,42 +3902,18 @@ function probeList(list, concurrency) {
   for (let k = 0; k < Math.min(con, queue.length); k++) next();
 }
 
-function probeHead(id) {
-  return fetch(musicStreamUrl(id), { method: 'HEAD', mode: 'cors', cache: 'no-store' }).then(function (r) {
+function probeHead(id, idx) {
+  return fetch(musicStreamUrl(id, idx || 0), { method: 'HEAD', mode: 'cors', cache: 'no-store' }).then(function (r) {
     const ct = (r.headers.get('content-type') || '').toLowerCase();
     return { ok: !!(r.ok && ct.indexOf('audio') >= 0), dur: 0 };
   }).catch(function () { return { ok: null, dur: 0 }; });
 }
 
 function probeOne(id) {
-  return new Promise(function (resolve) {
-    var a = document.createElement('audio');
-    var done = false;
-    var timer = setTimeout(function () { fin(null); }, 12000);
-    function fin(v) {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      var d = a.duration;
-      a.onloadedmetadata = null;
-      a.oncanplay = null;
-      a.onerror = null;
-      try { a.pause(); } catch (e) {}
-      a.removeAttribute('src');
-      if (v === true) {
-        resolve({ ok: true, dur: (isFinite(d) && d > 0) ? Math.round(d) : 0 });
-      } else if (v === false) {
-        resolve({ ok: false, dur: 0 });
-      } else {
-        probeHead(id).then(resolve);
-      }
-    }
-    a.preload = 'metadata';
-    a.onloadedmetadata = function () { fin(true); };
-    a.oncanplay = function () { fin(true); };
-    a.onerror = function () { fin(false); };
-    a.src = musicStreamUrl(id);
-    try { a.load(); } catch (e) {}
+  return probeHead(id, 0).then(function (r) {
+    if (r.ok === true) return r;
+    if (r.ok === false) return r;
+    return probeHead(id, 1);
   });
 }
 
@@ -4092,12 +4075,13 @@ function seekMusic(v) {
   au.currentTime = (v / 1000) * au.duration;
 }
 
-function playMusic(id) {
+function playMusic(id, tryIdx) {
   const box = document.getElementById('musicPlayerBox');
   if (!box || !id) return;
+  tryIdx = tryIdx || 0;
   appData.currentMusicId = id;
   updateMusicHero();
-  box.innerHTML = '<audio id="musicAudio" preload="none" src="' + musicStreamUrl(id) + '"></audio>';
+  box.innerHTML = '<audio id="musicAudio" preload="none" src="' + musicStreamUrl(id, tryIdx) + '"></audio>';
   const au = document.getElementById('musicAudio');
   if (au) {
     const isCur = function () { return document.getElementById('musicAudio') === au; };
@@ -4123,9 +4107,14 @@ function playMusic(id) {
     au.addEventListener('error', function () {
       if (!isCur()) return;
       setMusicPlayIcon(false);
+      if (tryIdx < MUSIC_SOURCES.length - 1) {
+        showToast('这个源不行，换下一个');
+        playMusic(id, tryIdx + 1);
+        return;
+      }
       const s = findSongEverywhere(id);
       if (s) { s.bad = true; saveData(); renderMusicList(); }
-      showToast('这首放不了，标了✕。别连着点检查');
+      showToast('几个源都放不了，标✕了');
     });
     const pr = au.play();
     if (pr && pr.catch) pr.catch(function () { if (isCur()) setMusicPlayIcon(false); });
@@ -4390,6 +4379,28 @@ function hideMusicFab() {
   saveData();
   closeMusicSheet();
   showToast('已隐藏');
+}
+
+function testMusicSources() {
+  const id = '718887';
+  const out = [];
+  let i = 0;
+  function step() {
+    if (i >= MUSIC_SOURCES.length) { showToast(out.join('  '), 5000); return; }
+    const n = MUSIC_SOURCES[i].name;
+    const u = musicStreamUrl(id, i);
+    i++;
+    fetch(u, { method: 'HEAD', mode: 'cors', cache: 'no-store' }).then(function (r) {
+      const ct = (r.headers.get('content-type') || '').toLowerCase();
+      out.push(n + (r.ok && ct.indexOf('audio') >= 0 ? '可' : '不行'));
+      step();
+    }).catch(function () {
+      out.push(n + '被拦');
+      step();
+    });
+  }
+  showToast('测音乐源…');
+  step();
 }
 
 function showMusicFab() {
