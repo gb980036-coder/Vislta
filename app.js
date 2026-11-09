@@ -3778,7 +3778,8 @@ function probeList(list, concurrency) {
 }
 
 function probeOne(id) {
-  return fetch(musicApiUrl(id, 'url'), { headers: { Range: 'bytes=0-1' } }).then(function (r) {
+  return fetch(musicApiUrl(id, 'url'), { method: 'HEAD' }).then(function (r) {
+    if (r.status === 429 || r.status >= 500) return true;
     const ct = (r.headers.get('content-type') || '').toLowerCase();
     return !!r.ok && ct.indexOf('audio') >= 0;
   }).catch(function () { return true; });
@@ -3849,6 +3850,7 @@ function addMusicFromInput() {
   }
   el.value = '';
   saveData();
+  renderMusicListSelect();
   playMusic(id);
   fetchMusicInfo(id);
 }
