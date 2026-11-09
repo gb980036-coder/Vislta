@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Vislta</title>
 <link rel="stylesheet" href="https://fastly.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.1/css/all.min.css">
 <link rel="stylesheet" href="style.css">
@@ -191,7 +191,7 @@
         <div class="setting-item" onclick="toggleFullscreen()">
           <div class="setting-icon"><i class="fas fa-expand"></i></div>
           <div class="setting-content">
-            <div class="setting-label">全屏模式</div>
+            <div class="setting-label">全屏幕模式</div>
             <div class="setting-desc">去掉浏览器栏。加到主屏启动时也是全屏</div>
           </div>
           <div class="setting-value" id="fullscreenState" style="font-size:12px;color:var(--text-tertiary);">关</div>
@@ -1249,7 +1249,7 @@
 
 
 <!-- 音乐悬浮按钮 -->
-<div id="musicFab" title="拖动可移动，点一下开音乐" style="touch-action:none;cursor:grab;position:fixed;right:12px;bottom:84px;z-index:9000;width:38px;height:38px;border-radius:50%;background:rgba(28,28,32,.5);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.18);cursor:pointer;font-size:14px;"><i class="fas fa-music"></i></div>
+<div id="musicFab" title="拖动可移动，点一下开音乐" style="touch-action:none;cursor:grab;position:fixed;right:12px;bottom:84px;z-index:9000;width:44px;height:44px;border-radius:50%;background:rgba(28,28,32,.5);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.18);cursor:pointer;font-size:14px;"><i class="fas fa-music"></i></div>
 
 <div id="musicMask" onclick="closeMusicSheet()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9000;"></div>
 <div id="musicPanel" style="position:fixed;left:50%;bottom:0;transform:translate(-50%,105%);transition:transform .3s cubic-bezier(.2,.8,.2,1);width:min(480px,100vw);max-height:82vh;background:var(--bg-secondary,#fff);border-radius:22px 22px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.28);z-index:9001;display:flex;flex-direction:column;overflow:hidden;">
@@ -1257,6 +1257,11 @@
   <div style="flex:0 0 auto;padding:2px 16px 4px;display:flex;align-items:center;justify-content:space-between;">
     <div style="font-size:14px;font-weight:600;">音乐<span style="font-size:10px;color:var(--text-tertiary);font-weight:400;margin-left:6px;">网易云</span></div>
     <div style="display:flex;align-items:center;gap:4px;"><div onclick="hideMusicFab()" title="隐藏悬浮按钮" style="cursor:pointer;padding:4px 8px;color:var(--text-tertiary);font-size:13px;"><i class="fas fa-eye-slash"></i></div><div onclick="closeMusicSheet()" style="cursor:pointer;padding:4px 8px;color:var(--text-tertiary);font-size:14px;">&#10005;</div></div>
+  </div>
+  <div style="flex:0 0 auto;display:flex;gap:6px;align-items:center;padding:0 10px 8px;">
+    <select id="musicListSelect" class="input" style="flex:1;min-width:0;font-size:12px;padding:7px 8px;" onchange="switchMusicList(this.value)"></select>
+    <button class="btn btn-secondary" style="padding:6px 9px;font-size:12px;flex:0 0 auto;" onclick="newMusicList()" title="新建歌单">&#65291;</button>
+    <button class="btn btn-secondary" style="padding:6px 9px;font-size:12px;flex:0 0 auto;" onclick="importPlaylistPrompt()" title="导入网易云歌单">导入</button>
   </div>
   <div style="flex:0 0 auto;display:flex;gap:14px;align-items:center;padding:6px 16px 12px;">
     <div id="musicCover" style="width:78px;height:78px;border-radius:16px;background:linear-gradient(135deg,#8fb8e8,#b9a8e8);background-size:cover;background-position:center;display:flex;align-items:center;justify-content:center;color:#fff;font-size:26px;flex:0 0 auto;box-shadow:0 4px 14px rgba(0,0,0,.12);"><i class="fas fa-music"></i></div>
@@ -1280,9 +1285,15 @@
     <input id="musicInput" class="input" placeholder="粘贴网易云链接或歌曲ID" style="flex:1;font-size:12px;padding:8px 10px;min-width:0;">
     <button class="btn btn-primary" style="padding:8px 12px;font-size:12px;" onclick="addMusicFromInput()">加</button>
   </div>
-  <div id="musicList" style="flex:1 1 auto;overflow:auto;padding:0 16px 14px;"></div>
+  <div id="musicList" style="flex:1 1 auto;overflow:auto;padding:0 16px 6px;"></div>
+  <div style="flex:0 0 auto;display:flex;gap:6px;padding:0 12px 12px;">
+    <button class="btn btn-secondary" style="flex:1;padding:6px 4px;font-size:11px;" onclick="checkMusicList()">检查</button>
+    <button class="btn btn-secondary" style="flex:1;padding:6px 4px;font-size:11px;" onclick="removeBadSongs()">清✕</button>
+    <button class="btn btn-secondary" style="flex:1;padding:6px 4px;font-size:11px;" onclick="renameMusicList()">改名</button>
+    <button class="btn btn-danger" style="flex:1;padding:6px 4px;font-size:11px;" onclick="deleteMusicList()">删歌单</button>
+  </div>
 </div>
 
-<script src="app.js?v=23"></script>
+<script src="app.js?v=24"></script>
 </body>
 </html>
