@@ -1277,10 +1277,11 @@
     <input id="musicSeek" type="range" min="0" max="1000" value="0" oninput="seekMusic(this.value)" style="flex:1;height:4px;accent-color:#3a7bd5;">
     <span id="musicDur" style="font-size:11px;color:var(--text-tertiary);width:34px;">0:00</span>
   </div>
-  <div style="flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:24px;padding:4px 0 8px;">
+  <div style="flex:0 0 auto;display:flex;align-items:center;justify-content:center;gap:12px;padding:4px 0 8px;">
     <div onclick="musicPrev()" style="cursor:pointer;width:42px;height:42px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary,#555);font-size:16px;"><i class="fas fa-step-backward"></i></div>
     <div id="musicPlayBtn" onclick="toggleMusicPlay()" style="cursor:pointer;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#4f8ef7,#6f5be8);color:#fff;display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 4px 14px rgba(79,142,247,.4);"><i class="fas fa-play"></i></div>
     <div onclick="musicNext()" style="cursor:pointer;width:42px;height:42px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary,#555);font-size:16px;"><i class="fas fa-step-forward"></i></div>
+    <div id="musicModeBtn" onclick="cycleMusicMode()" title="播放模式" style="cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;color:var(--text-tertiary,#999);font-size:11px;"><i class="fas fa-repeat"></i></div>
   </div>
   <div style="flex:0 0 auto;display:flex;gap:6px;padding:8px 16px 10px;">
     <input id="musicInput" class="input" placeholder="粘贴网易云链接或歌曲ID" style="flex:1;font-size:12px;padding:8px 10px;min-width:0;">
@@ -1289,12 +1290,13 @@
   <div id="musicList" style="flex:1 1 auto;overflow:auto;padding:0 16px 6px;"></div>
   <div style="flex:0 0 auto;display:flex;gap:6px;padding:0 12px 12px;">
     <button class="btn btn-secondary" style="flex:1;padding:6px 4px;font-size:11px;" onclick="checkMusicList()">检查</button>
+    <button id="musicMultiBtn" class="btn btn-secondary" style="flex:1;padding:6px 4px;font-size:11px;" onclick="multiBtnAction()">多选</button>
     <button class="btn btn-secondary" style="flex:1;padding:6px 4px;font-size:11px;" onclick="removeBadSongs()">清✕</button>
     <button class="btn btn-secondary" style="flex:1;padding:6px 4px;font-size:11px;" onclick="renameMusicList()">改名</button>
     <button class="btn btn-danger" style="flex:1;padding:6px 4px;font-size:11px;" onclick="deleteMusicList()">删歌单</button>
   </div>
 </div>
 
-<script src="app.js?v=30"></script>
+<script src="app.js?v=31"></script>
 </body>
 </html>
