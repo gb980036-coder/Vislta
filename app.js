@@ -3746,7 +3746,7 @@ function importPlaylistPrompt() {
     renderMusicList();
     renderMusicListSelect();
     showToast('导入 ' + added + ' 首，开始查能不能播');
-    probeList(list, 5);
+    probeList(list, 4);
   }).catch(function () { showToast('歌单抓不到，换个链接试试'); });
 }
 
@@ -3756,21 +3756,24 @@ function probeList(list, concurrency) {
   const token = ++musicProbeToken;
   const queue = list.songs.filter(function (s) { return !s.probe; });
   if (!queue.length) { showToast('都检查过了'); return; }
-  let idx = 0, done = 0, bad = 0;
+  let idx = 0, done = 0, bad = 0, unknown = 0;
   function next() {
     if (token !== musicProbeToken) return;
     if (idx >= queue.length) {
+      if (done < queue.length) return;
       saveData();
       renderMusicList();
-      showToast('检查完：' + bad + ' 首放不了');
+      renderMusicListSelect();
+      showToast('检查完：' + bad + ' 首放不了' + (unknown ? ('，' + unknown + ' 首没探出来') : ''));
       return;
     }
     const s = queue[idx++];
     probeOne(s.id).then(function (ok) {
-      s.probe = 1;
-      if (ok) { delete s.bad; } else { s.bad = true; bad++; }
       done++;
-      if (done % 10 === 0) { saveData(); renderMusicList(); }
+      if (ok === true) { s.probe = 1; delete s.bad; }
+      else if (ok === false) { s.probe = 1; s.bad = true; bad++; }
+      else { unknown++; }
+      if (done % 5 === 0 || done === queue.length) { saveData(); renderMusicList(); }
       next();
     });
   }
@@ -3778,11 +3781,27 @@ function probeList(list, concurrency) {
 }
 
 function probeOne(id) {
-  return fetch(musicApiUrl(id, 'url'), { method: 'HEAD' }).then(function (r) {
-    if (r.status === 429 || r.status >= 500) return true;
-    const ct = (r.headers.get('content-type') || '').toLowerCase();
-    return !!r.ok && ct.indexOf('audio') >= 0;
-  }).catch(function () { return true; });
+  return new Promise(function (resolve) {
+    var a = document.createElement('audio');
+    var done = false;
+    var timer = setTimeout(function () { fin(null); }, 15000);
+    function fin(v) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      a.onloadedmetadata = null;
+      a.oncanplay = null;
+      a.onerror = null;
+      try { a.pause(); } catch (e) {}
+      a.removeAttribute('src');
+      resolve(v);
+    }
+    a.preload = 'metadata';
+    a.onloadedmetadata = function () { fin(true); };
+    a.oncanplay = function () { fin(true); };
+    a.onerror = function () { fin(false); };
+    a.src = musicApiUrl(id, 'url');
+  });
 }
 
 function checkMusicList() {
@@ -3790,7 +3809,7 @@ function checkMusicList() {
   if (!list.songs || !list.songs.length) { showToast('这个歌单是空的'); return; }
   list.songs.forEach(function (s) { delete s.probe; });
   showToast('开始检查，别关页面');
-  probeList(list, 5);
+  probeList(list, 4);
 }
 
 function removeBadSongs() {
