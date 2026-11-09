@@ -3809,8 +3809,7 @@ function openMusicSheet() {
   const panel = document.getElementById('musicPanel');
   const mask = document.getElementById('musicMask');
   if (!panel) return;
-  renderMusicListSelect();
-  renderMusicList();
+  try { renderMusicListSelect(); renderMusicList(); } catch (e) { console.error('音乐列表渲染失败', e); }
   if (mask) mask.style.display = 'block';
   panel.style.transform = 'translate(-50%,0)';
   const fab = document.getElementById('musicFab');
@@ -4027,7 +4026,7 @@ function initMusicFab() {
     fab.style.right = 'auto';
     fab.style.bottom = 'auto';
   }
-  let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false, moved = false, justDragged = false;
+  let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false, moved = false, lastDragEnd = 0;
   fab.addEventListener('pointerdown', function (e) {
     if (e.button && e.button !== 0) return;
     const r = fab.getBoundingClientRect();
@@ -4038,7 +4037,7 @@ function initMusicFab() {
   fab.addEventListener('pointermove', function (e) {
     if (!dragging) return;
     const dx = e.clientX - sx, dy = e.clientY - sy;
-    if (!moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    if (!moved && Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
     moved = true;
     const w = fab.offsetWidth || 38, h = fab.offsetHeight || 38;
     const x = Math.max(4, Math.min(window.innerWidth - w - 4, ox + dx));
@@ -4054,13 +4053,15 @@ function initMusicFab() {
     if (moved) {
       const r = fab.getBoundingClientRect();
       appData.settings.musicFabPos = { x: Math.round(r.left), y: Math.round(r.top) };
+      lastDragEnd = Date.now();
       saveData();
-    } else {
-      toggleMusicPanel();
     }
   });
   fab.addEventListener('pointercancel', function () { dragging = false; });
-  fab.addEventListener('click', function (e) { e.preventDefault(); e.stopPropagation(); });
+  fab.addEventListener('click', function (e) {
+    if (Date.now() - lastDragEnd < 400) { e.preventDefault(); e.stopPropagation(); return; }
+    toggleMusicPanel();
+  });
 }
 
 function hideMusicFab() {
