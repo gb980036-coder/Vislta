@@ -3843,33 +3843,56 @@ function importPlaylistPrompt() {
 }
 
 let musicProbeToken = 0;
+let musicProbeBusy = false;
+
 function probeList(list, concurrency) {
   if (!list || !Array.isArray(list.songs)) return;
+  if (musicProbeBusy) { showToast('正在检查，等它跑完'); return; }
   const token = ++musicProbeToken;
   const queue = list.songs.filter(function (s) { return !s.probe; });
   if (!queue.length) { showToast('都检查过了'); return; }
-  let idx = 0, done = 0, bad = 0, unknown = 0;
+  musicProbeBusy = true;
+  const marked = [];
+  let idx = 0, done = 0, bad = 0, unknown = 0, failStreak = 0, aborted = false;
+  const con = Math.max(1, Math.min(concurrency || 2, 2));
+  function finish() {
+    musicProbeBusy = false;
+    saveData();
+    renderMusicList();
+    renderMusicListSelect();
+  }
+  function abortAll() {
+    aborted = true;
+    marked.forEach(function (s) { delete s.bad; });
+    finish();
+    showToast('连着放不出来，像是接口在限流，先停了。过一会儿再点检查');
+  }
   function next() {
-    if (token !== musicProbeToken) return;
+    if (token !== musicProbeToken) { musicProbeBusy = false; return; }
+    if (aborted) return;
     if (idx >= queue.length) {
       if (done < queue.length) return;
-      saveData();
-      renderMusicList();
-      renderMusicListSelect();
+      finish();
       showToast('检查完：' + bad + ' 首放不了' + (unknown ? ('，' + unknown + ' 首没探出来') : ''));
       return;
     }
     const s = queue[idx++];
     probeOne(s.id).then(function (r) {
+      if (aborted) return;
       done++;
-      if (r.ok === true) { s.probe = 1; delete s.bad; if (r.dur) s.dur = r.dur; }
-      else if (r.ok === false) { s.probe = 1; s.bad = true; bad++; }
-      else { unknown++; }
+      if (r.ok === true) { failStreak = 0; s.probe = 1; delete s.bad; if (r.dur) s.dur = r.dur; }
+      else if (r.ok === false) {
+        failStreak++;
+        s.probe = 1;
+        if (!s.bad) { s.bad = true; marked.push(s); }
+        bad++;
+      } else { unknown++; failStreak++; }
       if (done % 5 === 0 || done === queue.length) { saveData(); renderMusicList(); }
-      next();
+      if (failStreak >= 6) { abortAll(); return; }
+      setTimeout(next, 120);
     });
   }
-  for (let k = 0; k < Math.min(concurrency, queue.length); k++) next();
+  for (let k = 0; k < Math.min(con, queue.length); k++) next();
 }
 
 function probeHead(id) {
@@ -3912,11 +3935,25 @@ function probeOne(id) {
 }
 
 function checkMusicList() {
+  if (musicProbeBusy) { showToast('正在检查，别重复点'); return; }
   const list = getCurrentList();
   if (!list.songs || !list.songs.length) { showToast('这个歌单是空的'); return; }
   list.songs.forEach(function (s) { delete s.probe; });
   showToast('开始检查，别关页面');
-  probeList(list, 4);
+  probeList(list, 2);
+}
+
+function clearBadMarks() {
+  if (isVirtualList()) {
+    getAllSongs().forEach(function (s) { delete s.bad; delete s.probe; });
+    getCharHeartSongs().forEach(function (s) { delete s.bad; delete s.probe; });
+  } else {
+    getCurrentSongs().forEach(function (s) { delete s.bad; delete s.probe; });
+  }
+  saveData();
+  renderMusicList();
+  renderMusicListSelect();
+  showToast('✕ 都清掉了');
 }
 
 function removeBadSongs() {
@@ -3929,7 +3966,7 @@ function removeBadSongs() {
   saveData();
   renderMusicList();
   renderMusicListSelect();
-  showToast(n ? ('清掉 ' + n + ' 首') : '没有标记的');
+  showToast(n ? ('清掉 ' + n + ' 首') : '当前歌单没有标记');
 }
 
 function openMusicSheet() {
@@ -4074,16 +4111,21 @@ function playMusic(id) {
         if (s && (!s.dur || Math.abs(s.dur - d) > 1)) { s.dur = Math.round(d); saveData(); renderMusicList(); }
       }
     });
-    au.addEventListener('play', function () { if (isCur()) setMusicPlayIcon(true); });
+    au.addEventListener('play', function () {
+      if (!isCur()) return;
+      setMusicPlayIcon(true);
+      const s = findSongEverywhere(id);
+      if (s && s.bad) { delete s.bad; saveData(); renderMusicList(); }
+    });
     au.addEventListener('playing', function () { if (isCur()) setMusicPlayIcon(true); });
     au.addEventListener('pause', function () { if (isCur()) setMusicPlayIcon(false); });
     au.addEventListener('ended', function () { if (isCur()) musicEndedNext(); });
     au.addEventListener('error', function () {
+      if (!isCur()) return;
       setMusicPlayIcon(false);
-      const songs = getCurrentSongs();
-      const s = songs.find(function (x) { return x.id === id; });
+      const s = findSongEverywhere(id);
       if (s) { s.bad = true; saveData(); renderMusicList(); }
-      showToast('这首放不了，已标记');
+      showToast('这首放不了，标了✕。别连着点检查');
     });
     const pr = au.play();
     if (pr && pr.catch) pr.catch(function () { if (isCur()) setMusicPlayIcon(false); });
