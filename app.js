@@ -379,25 +379,12 @@ function formatDateDivider(timestamp) {
 
 function showToast(msg, duration = 2000) {
   const toast = document.getElementById('toast');
-  if (toast.classList.contains('show')) {
-    // 队列化：当前有提示显示时，暂存待展示，依次播放不互相覆盖
-    toastQueue.push({ msg, duration });
-    return;
-  }
+  if (!toast) return;
   toast.textContent = msg;
   toast.classList.add('show');
-  setTimeout(() => {
-    toast.classList.remove('show');
-    // 300ms 过渡动画后播放下一条
-    setTimeout(() => {
-      const next = toastQueue.shift();
-      if (next) showToast(next.msg, next.duration);
-    }, 320);
-  }, duration);
+  if (window.__toastTimer) clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(function () { toast.classList.remove('show'); }, duration);
 }
-
-// Toast 待播队列
-const toastQueue = [];
 
 function getInitial(name) {
   return name ? name.charAt(0).toUpperCase() : '?';
@@ -3851,14 +3838,17 @@ function importPlaylistPrompt() {
 
 let musicProbeToken = 0;
 let musicProbeBusy = false;
+let musicProbeStart = 0;
 
 function probeList(list, concurrency) {
   if (!list || !Array.isArray(list.songs)) return;
-  if (musicProbeBusy) { showToast('正在检查，等它跑完'); return; }
+  if (musicProbeBusy && Date.now() - musicProbeStart < 90000) { showToast('正在检查，等它跑完'); return; }
+  if (musicProbeBusy) musicProbeBusy = false;
   const token = ++musicProbeToken;
   const queue = list.songs.filter(function (s) { return !s.probe; });
   if (!queue.length) { showToast('都检查过了'); return; }
   musicProbeBusy = true;
+  musicProbeStart = Date.now();
   const marked = [];
   let idx = 0, done = 0, bad = 0, unknown = 0, failStreak = 0, aborted = false;
   const con = Math.max(1, Math.min(concurrency || 2, 2));
@@ -3872,6 +3862,7 @@ function probeList(list, concurrency) {
     aborted = true;
     marked.forEach(function (s) { delete s.bad; });
     finish();
+    showMusicTip('接口像在限流，先停了，过会儿再检查');
     showToast('连着放不出来，像是接口在限流，先停了。过一会儿再点检查');
   }
   function next() {
@@ -3880,6 +3871,7 @@ function probeList(list, concurrency) {
     if (idx >= queue.length) {
       if (done < queue.length) return;
       finish();
+      showMusicTip('检查完：' + bad + ' 首放不了' + (unknown ? ('，' + unknown + ' 首没探出来') : ''));
       showToast('检查完：' + bad + ' 首放不了' + (unknown ? ('，' + unknown + ' 首没探出来') : ''));
       return;
     }
@@ -3894,7 +3886,7 @@ function probeList(list, concurrency) {
         if (!s.bad) { s.bad = true; marked.push(s); }
         bad++;
       } else { unknown++; failStreak++; }
-      if (done % 5 === 0 || done === queue.length) { saveData(); renderMusicList(); }
+      if (done % 5 === 0 || done === queue.length) { saveData(); renderMusicList(); showMusicTip('检查中 ' + done + '/' + queue.length); }
       if (failStreak >= 6) { abortAll(); return; }
       setTimeout(next, 120);
     });
@@ -3903,10 +3895,16 @@ function probeList(list, concurrency) {
 }
 
 function probeHead(id, idx) {
-  return fetch(musicStreamUrl(id, idx || 0), { method: 'HEAD', mode: 'cors', cache: 'no-store' }).then(function (r) {
+  const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+  const timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 8000);
+  return fetch(musicStreamUrl(id, idx || 0), { method: 'HEAD', mode: 'cors', cache: 'no-store', signal: ctrl ? ctrl.signal : undefined }).then(function (r) {
     const ct = (r.headers.get('content-type') || '').toLowerCase();
+    clearTimeout(timer);
     return { ok: !!(r.ok && ct.indexOf('audio') >= 0), dur: 0 };
-  }).catch(function () { return { ok: null, dur: 0 }; });
+  }).catch(function () {
+    clearTimeout(timer);
+    return { ok: null, dur: 0 };
+  });
 }
 
 function probeOne(id) {
@@ -3918,11 +3916,13 @@ function probeOne(id) {
 }
 
 function checkMusicList() {
-  if (musicProbeBusy) { showToast('正在检查，别重复点'); return; }
+  if (musicProbeBusy && Date.now() - musicProbeStart < 90000) { showToast('正在检查，别重复点'); return; }
+  musicProbeBusy = false;
   const list = getCurrentList();
   if (!list.songs || !list.songs.length) { showToast('这个歌单是空的'); return; }
   list.songs.forEach(function (s) { delete s.probe; });
   showToast('开始检查，别关页面');
+  showMusicTip('开始检查…');
   probeList(list, 2);
 }
 
@@ -3936,6 +3936,7 @@ function clearBadMarks() {
   saveData();
   renderMusicList();
   renderMusicListSelect();
+  showMusicTip('✕ 都清掉了');
   showToast('✕ 都清掉了');
 }
 
@@ -3949,6 +3950,7 @@ function removeBadSongs() {
   saveData();
   renderMusicList();
   renderMusicListSelect();
+  showMusicTip(n ? ('清掉 ' + n + ' 首') : '当前歌单没有标记');
   showToast(n ? ('清掉 ' + n + ' 首') : '当前歌单没有标记');
 }
 
@@ -4081,8 +4083,13 @@ function playMusic(id, tryIdx) {
   tryIdx = tryIdx || 0;
   appData.currentMusicId = id;
   updateMusicHero();
-  box.innerHTML = '<audio id="musicAudio" preload="none" src="' + musicStreamUrl(id, tryIdx) + '"></audio>';
-  const au = document.getElementById('musicAudio');
+  box.innerHTML = '';
+  const au = document.createElement('audio');
+  au.id = 'musicAudio';
+  au.preload = 'auto';
+  au.src = musicStreamUrl(id, tryIdx);
+  box.appendChild(au);
+  try { au.load(); } catch (e) {}
   if (au) {
     const isCur = function () { return document.getElementById('musicAudio') === au; };
     au.addEventListener('timeupdate', updateMusicProgress);
@@ -4109,7 +4116,7 @@ function playMusic(id, tryIdx) {
       setMusicPlayIcon(false);
       if (tryIdx < MUSIC_SOURCES.length - 1) {
         showToast('这个源不行，换下一个');
-        playMusic(id, tryIdx + 1);
+        setTimeout(function () { playMusic(id, tryIdx + 1); }, 350);
         return;
       }
       const s = findSongEverywhere(id);
@@ -4225,6 +4232,12 @@ function removeMusic(index) {
 
 let musicMultiMode = false;
 let musicPicked = {};
+
+function showMusicTip(msg) {
+  const el = document.getElementById('musicTip');
+  if (!el) return;
+  el.textContent = msg;
+}
 
 function updateMusicMultiBtn() {
   const b = document.getElementById('musicMultiBtn');
