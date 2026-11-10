@@ -379,12 +379,25 @@ function formatDateDivider(timestamp) {
 
 function showToast(msg, duration = 2000) {
   const toast = document.getElementById('toast');
-  if (!toast) return;
+  if (toast.classList.contains('show')) {
+    // 队列化：当前有提示显示时，暂存待展示，依次播放不互相覆盖
+    toastQueue.push({ msg, duration });
+    return;
+  }
   toast.textContent = msg;
   toast.classList.add('show');
-  if (window.__toastTimer) clearTimeout(window.__toastTimer);
-  window.__toastTimer = setTimeout(function () { toast.classList.remove('show'); }, duration);
+  setTimeout(() => {
+    toast.classList.remove('show');
+    // 300ms 过渡动画后播放下一条
+    setTimeout(() => {
+      const next = toastQueue.shift();
+      if (next) showToast(next.msg, next.duration);
+    }, 320);
+  }, duration);
 }
+
+// Toast 待播队列
+const toastQueue = [];
 
 function getInitial(name) {
   return name ? name.charAt(0).toUpperCase() : '?';
@@ -3606,15 +3619,8 @@ function restoreAllData(input) {
 }
 
 // ==================== 音乐播放器 ====================
-const MUSIC_SOURCES = [
-  { name: '源1', base: 'https://api.qijieya.cn/meting/?server=netease&type=url&id=', tail: '' },
-  { name: '源2', base: 'https://api.injahow.cn/meting/?server=netease&type=url&id=', tail: '' },
-  { name: '源3', base: 'https://music.163.com/song/media/outer/url?id=', tail: '.mp3' }
-];
-
-function musicStreamUrl(id, idx) {
-  const s = MUSIC_SOURCES[idx || 0] || MUSIC_SOURCES[0];
-  return s.base + encodeURIComponent(id) + (s.tail || '');
+function musicStreamUrl(id) {
+  return 'https://api.qijieya.cn/meting/?server=netease&type=url&id=' + encodeURIComponent(id);
 }
 
 function musicApiUrl(id, type) {
@@ -3837,107 +3843,80 @@ function importPlaylistPrompt() {
 }
 
 let musicProbeToken = 0;
-let musicProbeBusy = false;
-let musicProbeStart = 0;
-
 function probeList(list, concurrency) {
   if (!list || !Array.isArray(list.songs)) return;
-  if (musicProbeBusy && Date.now() - musicProbeStart < 90000) { showToast('正在检查，等它跑完'); return; }
-  if (musicProbeBusy) musicProbeBusy = false;
   const token = ++musicProbeToken;
   const queue = list.songs.filter(function (s) { return !s.probe; });
   if (!queue.length) { showToast('都检查过了'); return; }
-  musicProbeBusy = true;
-  musicProbeStart = Date.now();
-  const marked = [];
-  let idx = 0, done = 0, bad = 0, unknown = 0, failStreak = 0, aborted = false;
-  const con = Math.max(1, Math.min(concurrency || 2, 2));
-  function finish() {
-    musicProbeBusy = false;
-    saveData();
-    renderMusicList();
-    renderMusicListSelect();
-  }
-  function abortAll() {
-    aborted = true;
-    marked.forEach(function (s) { delete s.bad; });
-    finish();
-    showMusicTip('接口像在限流，先停了，过会儿再检查');
-    showToast('连着放不出来，像是接口在限流，先停了。过一会儿再点检查');
-  }
+  let idx = 0, done = 0, bad = 0, unknown = 0;
   function next() {
-    if (token !== musicProbeToken) { musicProbeBusy = false; return; }
-    if (aborted) return;
+    if (token !== musicProbeToken) return;
     if (idx >= queue.length) {
       if (done < queue.length) return;
-      finish();
-      showMusicTip('检查完：' + bad + ' 首放不了' + (unknown ? ('，' + unknown + ' 首没探出来') : ''));
+      saveData();
+      renderMusicList();
+      renderMusicListSelect();
       showToast('检查完：' + bad + ' 首放不了' + (unknown ? ('，' + unknown + ' 首没探出来') : ''));
       return;
     }
     const s = queue[idx++];
     probeOne(s.id).then(function (r) {
-      if (aborted) return;
       done++;
-      if (r.ok === true) { failStreak = 0; s.probe = 1; delete s.bad; if (r.dur) s.dur = r.dur; }
-      else if (r.ok === false) {
-        failStreak++;
-        s.probe = 1;
-        if (!s.bad) { s.bad = true; marked.push(s); }
-        bad++;
-      } else { unknown++; failStreak++; }
-      if (done % 5 === 0 || done === queue.length) { saveData(); renderMusicList(); showMusicTip('检查中 ' + done + '/' + queue.length); }
-      if (failStreak >= 6) { abortAll(); return; }
-      setTimeout(next, 120);
+      if (r.ok === true) { s.probe = 1; delete s.bad; if (r.dur) s.dur = r.dur; }
+      else if (r.ok === false) { s.probe = 1; s.bad = true; bad++; }
+      else { unknown++; }
+      if (done % 5 === 0 || done === queue.length) { saveData(); renderMusicList(); }
+      next();
     });
   }
-  for (let k = 0; k < Math.min(con, queue.length); k++) next();
+  for (let k = 0; k < Math.min(concurrency, queue.length); k++) next();
 }
 
-function probeHead(id, idx) {
-  const ctrl = (typeof AbortController !== 'undefined') ? new AbortController() : null;
-  const timer = setTimeout(function () { if (ctrl) ctrl.abort(); }, 8000);
-  return fetch(musicStreamUrl(id, idx || 0), { method: 'HEAD', mode: 'cors', cache: 'no-store', signal: ctrl ? ctrl.signal : undefined }).then(function (r) {
+function probeHead(id) {
+  return fetch(musicStreamUrl(id), { method: 'HEAD', mode: 'cors', cache: 'no-store' }).then(function (r) {
     const ct = (r.headers.get('content-type') || '').toLowerCase();
-    clearTimeout(timer);
     return { ok: !!(r.ok && ct.indexOf('audio') >= 0), dur: 0 };
-  }).catch(function () {
-    clearTimeout(timer);
-    return { ok: null, dur: 0 };
-  });
+  }).catch(function () { return { ok: null, dur: 0 }; });
 }
 
 function probeOne(id) {
-  return probeHead(id, 0).then(function (r) {
-    if (r.ok === true) return r;
-    if (r.ok === false) return r;
-    return probeHead(id, 1);
+  return new Promise(function (resolve) {
+    var a = document.createElement('audio');
+    var done = false;
+    var timer = setTimeout(function () { fin(null); }, 12000);
+    function fin(v) {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      var d = a.duration;
+      a.onloadedmetadata = null;
+      a.oncanplay = null;
+      a.onerror = null;
+      try { a.pause(); } catch (e) {}
+      a.removeAttribute('src');
+      if (v === true) {
+        resolve({ ok: true, dur: (isFinite(d) && d > 0) ? Math.round(d) : 0 });
+      } else if (v === false) {
+        resolve({ ok: false, dur: 0 });
+      } else {
+        probeHead(id).then(resolve);
+      }
+    }
+    a.preload = 'metadata';
+    a.onloadedmetadata = function () { fin(true); };
+    a.oncanplay = function () { fin(true); };
+    a.onerror = function () { fin(false); };
+    a.src = musicStreamUrl(id);
+    try { a.load(); } catch (e) {}
   });
 }
 
 function checkMusicList() {
-  if (musicProbeBusy && Date.now() - musicProbeStart < 90000) { showToast('正在检查，别重复点'); return; }
-  musicProbeBusy = false;
   const list = getCurrentList();
   if (!list.songs || !list.songs.length) { showToast('这个歌单是空的'); return; }
   list.songs.forEach(function (s) { delete s.probe; });
   showToast('开始检查，别关页面');
-  showMusicTip('开始检查…');
-  probeList(list, 2);
-}
-
-function clearBadMarks() {
-  if (isVirtualList()) {
-    getAllSongs().forEach(function (s) { delete s.bad; delete s.probe; });
-    getCharHeartSongs().forEach(function (s) { delete s.bad; delete s.probe; });
-  } else {
-    getCurrentSongs().forEach(function (s) { delete s.bad; delete s.probe; });
-  }
-  saveData();
-  renderMusicList();
-  renderMusicListSelect();
-  showMusicTip('✕ 都清掉了');
-  showToast('✕ 都清掉了');
+  probeList(list, 4);
 }
 
 function removeBadSongs() {
@@ -3950,8 +3929,7 @@ function removeBadSongs() {
   saveData();
   renderMusicList();
   renderMusicListSelect();
-  showMusicTip(n ? ('清掉 ' + n + ' 首') : '当前歌单没有标记');
-  showToast(n ? ('清掉 ' + n + ' 首') : '当前歌单没有标记');
+  showToast(n ? ('清掉 ' + n + ' 首') : '没有标记的');
 }
 
 function openMusicSheet() {
@@ -4077,19 +4055,13 @@ function seekMusic(v) {
   au.currentTime = (v / 1000) * au.duration;
 }
 
-function playMusic(id, tryIdx) {
+function playMusic(id) {
   const box = document.getElementById('musicPlayerBox');
   if (!box || !id) return;
-  tryIdx = tryIdx || 0;
   appData.currentMusicId = id;
   updateMusicHero();
-  box.innerHTML = '';
-  const au = document.createElement('audio');
-  au.id = 'musicAudio';
-  au.preload = 'auto';
-  au.src = musicStreamUrl(id, tryIdx);
-  box.appendChild(au);
-  try { au.load(); } catch (e) {}
+  box.innerHTML = '<audio id="musicAudio" preload="none" src="' + musicStreamUrl(id) + '"></audio>';
+  const au = document.getElementById('musicAudio');
   if (au) {
     const isCur = function () { return document.getElementById('musicAudio') === au; };
     au.addEventListener('timeupdate', updateMusicProgress);
@@ -4102,26 +4074,16 @@ function playMusic(id, tryIdx) {
         if (s && (!s.dur || Math.abs(s.dur - d) > 1)) { s.dur = Math.round(d); saveData(); renderMusicList(); }
       }
     });
-    au.addEventListener('play', function () {
-      if (!isCur()) return;
-      setMusicPlayIcon(true);
-      const s = findSongEverywhere(id);
-      if (s && s.bad) { delete s.bad; saveData(); renderMusicList(); }
-    });
+    au.addEventListener('play', function () { if (isCur()) setMusicPlayIcon(true); });
     au.addEventListener('playing', function () { if (isCur()) setMusicPlayIcon(true); });
     au.addEventListener('pause', function () { if (isCur()) setMusicPlayIcon(false); });
     au.addEventListener('ended', function () { if (isCur()) musicEndedNext(); });
     au.addEventListener('error', function () {
-      if (!isCur()) return;
       setMusicPlayIcon(false);
-      if (tryIdx < MUSIC_SOURCES.length - 1) {
-        showToast('这个源不行，换下一个');
-        setTimeout(function () { playMusic(id, tryIdx + 1); }, 350);
-        return;
-      }
-      const s = findSongEverywhere(id);
+      const songs = getCurrentSongs();
+      const s = songs.find(function (x) { return x.id === id; });
       if (s) { s.bad = true; saveData(); renderMusicList(); }
-      showToast('几个源都放不了，标✕了');
+      showToast('这首放不了，已标记');
     });
     const pr = au.play();
     if (pr && pr.catch) pr.catch(function () { if (isCur()) setMusicPlayIcon(false); });
@@ -4232,12 +4194,6 @@ function removeMusic(index) {
 
 let musicMultiMode = false;
 let musicPicked = {};
-
-function showMusicTip(msg) {
-  const el = document.getElementById('musicTip');
-  if (!el) return;
-  el.textContent = msg;
-}
 
 function updateMusicMultiBtn() {
   const b = document.getElementById('musicMultiBtn');
@@ -4392,28 +4348,6 @@ function hideMusicFab() {
   saveData();
   closeMusicSheet();
   showToast('已隐藏');
-}
-
-function testMusicSources() {
-  const id = '718887';
-  const out = [];
-  let i = 0;
-  function step() {
-    if (i >= MUSIC_SOURCES.length) { showToast(out.join('  '), 5000); return; }
-    const n = MUSIC_SOURCES[i].name;
-    const u = musicStreamUrl(id, i);
-    i++;
-    fetch(u, { method: 'HEAD', mode: 'cors', cache: 'no-store' }).then(function (r) {
-      const ct = (r.headers.get('content-type') || '').toLowerCase();
-      out.push(n + (r.ok && ct.indexOf('audio') >= 0 ? '可' : '不行'));
-      step();
-    }).catch(function () {
-      out.push(n + '被拦');
-      step();
-    });
-  }
-  showToast('测音乐源…');
-  step();
 }
 
 function showMusicFab() {
