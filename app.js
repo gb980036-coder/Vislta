@@ -506,7 +506,6 @@ function applyTheme() {
   renderMusicListSelect();
   renderMusicList();
   initMusicFab();
-  updateMusicModeBtn();
   updateFullscreenState();
   const kwInputEl = document.getElementById('keywordRulesInput');
   if (kwInputEl) kwInputEl.value = appData.settings.keywordRules || '';
@@ -3651,53 +3650,13 @@ function ensureMusicLists() {
     appData.musicLists = [{ id: 'list_default', name: '我的歌单', songs: (appData.music || []).slice() }];
     appData.currentListId = 'list_default';
   }
-  if (!appData.currentListId || (!appData.musicLists.some(function (l) { return l.id === appData.currentListId; }) && appData.currentListId !== 'list_heart' && appData.currentListId !== 'char_heart')) {
+  if (!appData.currentListId || !appData.musicLists.some(function (l) { return l.id === appData.currentListId; })) {
     appData.currentListId = appData.musicLists[0].id;
   }
 }
 
-function getAllSongs() {
-  ensureMusicLists();
-  const out = [];
-  const seen = {};
-  appData.musicLists.forEach(function (l) {
-    (l.songs || []).forEach(function (s) {
-      if (seen[s.id]) return;
-      seen[s.id] = 1;
-      out.push(s);
-    });
-  });
-  return out;
-}
-
-function getHeartSongs() {
-  return getAllSongs().filter(function (s) { return s.heart; });
-}
-
-function getCharHeartSongs() {
-  if (!Array.isArray(appData.charHeartSongs)) appData.charHeartSongs = [];
-  return appData.charHeartSongs;
-}
-
-function isVirtualList() {
-  return appData.currentListId === 'list_heart' || appData.currentListId === 'char_heart';
-}
-
-function findSongEverywhere(id) {
-  let found = null;
-  getAllSongs().forEach(function (s) { if (s.id === id) found = s; });
-  getCharHeartSongs().forEach(function (s) { if (s.id === id && !found) found = s; });
-  return found;
-}
-
 function getCurrentList() {
   ensureMusicLists();
-  if (appData.currentListId === 'list_heart') {
-    return { id: 'list_heart', name: '心动（我）', songs: getHeartSongs(), virtual: true };
-  }
-  if (appData.currentListId === 'char_heart') {
-    return { id: 'char_heart', name: '心动（Ta）', songs: getCharHeartSongs(), virtual: true };
-  }
   const l = appData.musicLists.find(function (x) { return x.id === appData.currentListId; });
   return l || appData.musicLists[0];
 }
@@ -3712,13 +3671,10 @@ function renderMusicListSelect() {
   const sel = document.getElementById('musicListSelect');
   if (!sel) return;
   ensureMusicLists();
-  let html = '<option value="list_heart"' + (appData.currentListId === 'list_heart' ? ' selected' : '') + '>心动（我）(' + getHeartSongs().length + ')</option>';
-  html += '<option value="char_heart"' + (appData.currentListId === 'char_heart' ? ' selected' : '') + '>心动（Ta）(' + getCharHeartSongs().length + ')</option>';
-  html += appData.musicLists.map(function (l) {
+  sel.innerHTML = appData.musicLists.map(function (l) {
     const n = Array.isArray(l.songs) ? l.songs.length : 0;
     return '<option value="' + l.id + '"' + (l.id === appData.currentListId ? ' selected' : '') + '>' + escapeHtml(l.name) + ' (' + n + ')</option>';
   }).join('');
-  sel.innerHTML = html;
 }
 
 function switchMusicList(id) {
@@ -3743,7 +3699,6 @@ function newMusicList() {
 }
 
 function renameMusicList() {
-  if (isVirtualList()) { showToast('心动歌单是固定名字'); return; }
   const l = getCurrentList();
   const n = prompt('歌单名字', l.name || '');
   if (n === null) return;
@@ -3753,7 +3708,6 @@ function renameMusicList() {
 }
 
 function deleteMusicList() {
-  if (isVirtualList()) { showToast('心动歌单删不了，只能移出里面的歌'); return; }
   ensureMusicLists();
   const l = getCurrentList();
   if (!confirm('删掉歌单“' + l.name + '”？里面的歌也没有了')) return;
@@ -3860,10 +3814,10 @@ function probeList(list, concurrency) {
       return;
     }
     const s = queue[idx++];
-    probeOne(s.id).then(function (r) {
+    probeOne(s.id).then(function (ok) {
       done++;
-      if (r.ok === true) { s.probe = 1; delete s.bad; if (r.dur) s.dur = r.dur; }
-      else if (r.ok === false) { s.probe = 1; s.bad = true; bad++; }
+      if (ok === true) { s.probe = 1; delete s.bad; }
+      else if (ok === false) { s.probe = 1; s.bad = true; bad++; }
       else { unknown++; }
       if (done % 5 === 0 || done === queue.length) { saveData(); renderMusicList(); }
       next();
@@ -3872,42 +3826,27 @@ function probeList(list, concurrency) {
   for (let k = 0; k < Math.min(concurrency, queue.length); k++) next();
 }
 
-function probeHead(id) {
-  return fetch(musicStreamUrl(id), { method: 'HEAD', mode: 'cors', cache: 'no-store' }).then(function (r) {
-    const ct = (r.headers.get('content-type') || '').toLowerCase();
-    return { ok: !!(r.ok && ct.indexOf('audio') >= 0), dur: 0 };
-  }).catch(function () { return { ok: null, dur: 0 }; });
-}
-
 function probeOne(id) {
   return new Promise(function (resolve) {
     var a = document.createElement('audio');
     var done = false;
-    var timer = setTimeout(function () { fin(null); }, 12000);
+    var timer = setTimeout(function () { fin(null); }, 15000);
     function fin(v) {
       if (done) return;
       done = true;
       clearTimeout(timer);
-      var d = a.duration;
       a.onloadedmetadata = null;
       a.oncanplay = null;
       a.onerror = null;
       try { a.pause(); } catch (e) {}
       a.removeAttribute('src');
-      if (v === true) {
-        resolve({ ok: true, dur: (isFinite(d) && d > 0) ? Math.round(d) : 0 });
-      } else if (v === false) {
-        resolve({ ok: false, dur: 0 });
-      } else {
-        probeHead(id).then(resolve);
-      }
+      resolve(v);
     }
     a.preload = 'metadata';
     a.onloadedmetadata = function () { fin(true); };
     a.oncanplay = function () { fin(true); };
     a.onerror = function () { fin(false); };
     a.src = musicStreamUrl(id);
-    try { a.load(); } catch (e) {}
   });
 }
 
@@ -3920,7 +3859,6 @@ function checkMusicList() {
 }
 
 function removeBadSongs() {
-  if (isVirtualList()) { showToast('心动歌单是汇总的，回原歌单里清'); return; }
   const list = getCurrentList();
   if (!Array.isArray(list.songs)) return;
   const before = list.songs.length;
@@ -3939,7 +3877,6 @@ function openMusicSheet() {
   try { renderMusicListSelect(); renderMusicList(); } catch (e) { console.error('音乐列表渲染失败', e); }
   const curAu = document.getElementById('musicAudio');
   setMusicPlayIcon(!!curAu && !curAu.paused);
-  updateMusicModeBtn();
   if (mask) mask.style.display = 'block';
   panel.style.transform = 'translate(-50%,0)';
   const fab = document.getElementById('musicFab');
@@ -3973,20 +3910,9 @@ function addMusicFromInput() {
   let name = '';
   const quoted = raw.match(/《([^》]+)》/);
   if (quoted) name = quoted[1].trim();
-  let songs = getCurrentSongs();
-  let intoHeart = false;
-  if (appData.currentListId === 'char_heart') {
-    songs = getCharHeartSongs();
-  } else if (appData.currentListId === 'list_heart') {
-    ensureMusicLists();
-    songs = appData.musicLists[0].songs;
-    intoHeart = true;
-  }
-  if (!Array.isArray(songs)) songs = [];
+  const songs = getCurrentSongs();
   if (!songs.some(function (s) { return s.id === id; })) {
-    const item = { id: id, name: name || ('网易云 ' + id), artist: '', addedAt: Date.now() };
-    if (intoHeart) item.heart = true;
-    songs.unshift(item);
+    songs.unshift({ id: id, name: name || ('网易云 ' + id), artist: '', addedAt: Date.now() });
   }
   el.value = '';
   saveData();
@@ -3999,7 +3925,10 @@ function fetchMusicInfo(id) {
   fetch(musicApiUrl(id, 'song')).then(function (r) { return r.json(); }).then(function (list) {
     const info = Array.isArray(list) ? list[0] : list;
     if (!info || !info.name) return;
-    const found = findSongEverywhere(id);
+    let found = null;
+    (appData.musicLists || []).forEach(function (l) {
+      (l.songs || []).forEach(function (s) { if (s.id === id) found = s; });
+    });
     if (!found) return;
     found.name = info.name;
     found.artist = info.artist || '';
@@ -4063,21 +3992,13 @@ function playMusic(id) {
   box.innerHTML = '<audio id="musicAudio" preload="none" src="' + musicStreamUrl(id) + '"></audio>';
   const au = document.getElementById('musicAudio');
   if (au) {
-    const isCur = function () { return document.getElementById('musicAudio') === au; };
     au.addEventListener('timeupdate', updateMusicProgress);
-    au.addEventListener('loadedmetadata', function () {
-      updateMusicProgress();
-      if (!isCur()) return;
-      const d = au.duration;
-      if (isFinite(d) && d > 0) {
-        const s = findSongEverywhere(id);
-        if (s && (!s.dur || Math.abs(s.dur - d) > 1)) { s.dur = Math.round(d); saveData(); renderMusicList(); }
-      }
-    });
+    au.addEventListener('loadedmetadata', updateMusicProgress);
+    const isCur = function () { return document.getElementById('musicAudio') === au; };
     au.addEventListener('play', function () { if (isCur()) setMusicPlayIcon(true); });
     au.addEventListener('playing', function () { if (isCur()) setMusicPlayIcon(true); });
     au.addEventListener('pause', function () { if (isCur()) setMusicPlayIcon(false); });
-    au.addEventListener('ended', function () { if (isCur()) musicEndedNext(); });
+    au.addEventListener('ended', function () { if (isCur()) musicNext(); });
     au.addEventListener('error', function () {
       setMusicPlayIcon(false);
       const songs = getCurrentSongs();
@@ -4105,50 +4026,9 @@ function toggleMusicPlay() {
   setMusicPlayIcon(!au.paused);
 }
 
-const MUSIC_MODES = ['order', 'loop', 'single', 'shuffle'];
-const MUSIC_MODE_NAMES = { order: '按顺序', loop: '列表循环', single: '单曲循环', shuffle: '随机' };
-const MUSIC_MODE_ICONS = { order: 'fa-list-ol', loop: 'fa-repeat', single: 'fa-redo', shuffle: 'fa-random' };
-
-function getMusicMode() { return appData.settings.musicMode || 'loop'; }
-
-function updateMusicModeBtn() {
-  const b = document.getElementById('musicModeBtn');
-  if (!b) return;
-  const m = getMusicMode();
-  b.innerHTML = '<i class="fas ' + MUSIC_MODE_ICONS[m] + '"></i>';
-  b.title = '播放模式：' + MUSIC_MODE_NAMES[m];
-}
-
-function cycleMusicMode() {
-  const next = MUSIC_MODES[(MUSIC_MODES.indexOf(getMusicMode()) + 1) % MUSIC_MODES.length];
-  appData.settings.musicMode = next;
-  saveData();
-  updateMusicModeBtn();
-  showToast('播放模式：' + MUSIC_MODE_NAMES[next]);
-}
-
-function musicEndedNext() {
-  const mode = getMusicMode();
-  if (mode === 'single') { playMusic(appData.currentMusicId); return; }
-  if (mode === 'order') {
-    const list = getCurrentSongs();
-    const i = list.findIndex(function (m) { return m.id === appData.currentMusicId; });
-    let j = -1;
-    for (let k = i + 1; k < list.length; k++) { if (!list[k].bad) { j = k; break; } }
-    if (j < 0) { setMusicPlayIcon(false); showToast('歌单放完了'); return; }
-    playMusic(list[j].id);
-    return;
-  }
-  musicStep(1);
-}
-
 function musicStep(delta) {
   const list = getCurrentSongs();
   if (!list.length) return;
-  if (getMusicMode() === 'shuffle' && list.length > 1) {
-    const pool = list.filter(function (s) { return !s.bad && s.id !== appData.currentMusicId; });
-    if (pool.length) { playMusic(pool[Math.floor(Math.random() * pool.length)].id); return; }
-  }
   let i = list.findIndex(function (m) { return m.id === appData.currentMusicId; });
   if (i < 0) i = 0;
   let n = 0;
@@ -4176,86 +4056,11 @@ function renameMusic(id) {
 
 function removeMusic(index) {
   const songs = getCurrentSongs();
-  const m = songs[index];
-  if (!m) return;
-  if (appData.currentListId === 'char_heart') {
-    appData.charHeartSongs = getCharHeartSongs().filter(function (s) { return s.id !== m.id; });
-  } else if (appData.currentListId === 'list_heart') {
-    const src = findSongEverywhere(m.id);
-    if (src) delete src.heart;
-  } else {
-    songs.splice(index, 1);
-  }
+  songs.splice(index, 1);
   saveData();
   renderMusicList();
   renderMusicListSelect();
-  showToast(appData.currentListId === 'char_heart' ? '已移出' : (appData.currentListId === 'list_heart' ? '已移出心动' : '已删除'));
-}
-
-let musicMultiMode = false;
-let musicPicked = {};
-
-function updateMusicMultiBtn() {
-  const b = document.getElementById('musicMultiBtn');
-  if (!b) return;
-  const n = Object.keys(musicPicked).length;
-  b.textContent = musicMultiMode ? (n ? ('删选中 ' + n) : '退出多选') : '多选';
-}
-
-function togglePick(id) {
-  if (musicPicked[id]) delete musicPicked[id];
-  else musicPicked[id] = 1;
-  updateMusicMultiBtn();
-}
-
-function multiBtnAction() {
-  if (!musicMultiMode) {
-    musicMultiMode = true;
-    musicPicked = {};
-    renderMusicList();
-    showToast('勾选前面的框，再点一次“删选中”');
-    return;
-  }
-  const ids = Object.keys(musicPicked);
-  if (!ids.length) {
-    musicMultiMode = false;
-    renderMusicList();
-    showToast('已退出多选');
-    return;
-  }
-  if (!confirm('删掉选中的 ' + ids.length + ' 首？')) return;
-  if (appData.currentListId === 'char_heart') {
-    appData.charHeartSongs = getCharHeartSongs().filter(function (s) { return !musicPicked[s.id]; });
-  } else if (appData.currentListId === 'list_heart') {
-    getAllSongs().forEach(function (s) { if (musicPicked[s.id]) delete s.heart; });
-  } else {
-    const l = getCurrentList();
-    l.songs = (l.songs || []).filter(function (s) { return !musicPicked[s.id]; });
-  }
-  musicMultiMode = false;
-  musicPicked = {};
-  saveData();
-  renderMusicList();
-  renderMusicListSelect();
-  showToast('已删除 ' + ids.length + ' 首');
-}
-
-function toggleHeart(id) {
-  if (appData.currentListId === 'char_heart') {
-    appData.charHeartSongs = getCharHeartSongs().filter(function (s) { return s.id !== id; });
-    saveData();
-    renderMusicList();
-    renderMusicListSelect();
-    showToast('已从 Ta 的心动移出');
-    return;
-  }
-  const s = findSongEverywhere(id);
-  if (!s) return;
-  s.heart = !s.heart;
-  saveData();
-  renderMusicList();
-  renderMusicListSelect();
-  showToast(s.heart ? '已放进心动' : '已移出心动');
+  showToast('已删除');
 }
 
 function renderMusicList() {
@@ -4264,27 +4069,18 @@ function renderMusicList() {
   const songs = getCurrentSongs();
   if (!songs.length) {
     list.innerHTML = '<div style="font-size:12px;color:var(--text-tertiary);padding:8px 0;">这个歌单还空着。上面贴链接，或者点“导入”</div>';
-    updateMusicMultiBtn();
     return;
   }
   list.innerHTML = songs.map(function (m, i) {
     const active = m.id === appData.currentMusicId;
     const color = active ? 'color:var(--accent-color,#3a7bd5);font-weight:600;' : (m.bad ? 'color:var(--text-tertiary);text-decoration:line-through;' : '');
     const label = (m.bad ? '✕ ' : '') + m.name + (m.artist ? ' - ' + m.artist : '');
-    const pick = musicMultiMode ? '<input type="checkbox" ' + (musicPicked[m.id] ? 'checked' : '') + ' onchange="togglePick(\' + m.id + \')" style="margin:0 2px 0 0;flex:0 0 auto;">' : '';
-    const dur = m.dur ? '<span style="flex:0 0 auto;font-size:10px;color:var(--text-tertiary);">' + fmtTime(m.dur) + '</span>' : '';
-    let acts = '';
-    if (!musicMultiMode) {
-      acts = '<button class="btn btn-secondary" style="padding:3px 5px;font-size:11px;" onclick="toggleHeart(\' + m.id + \')">' + (m.heart ? '♥' : '♡') + '</button>'
-        + '<button class="btn btn-secondary" style="padding:3px 6px;font-size:11px;" onclick="renameMusic(\' + m.id + \')">名</button>'
-        + '<button class="btn btn-danger" style="padding:3px 6px;font-size:11px;" onclick="removeMusic(' + i + ')">删</button>';
-    }
-    return '<div style="display:flex;align-items:center;gap:5px;padding:8px 0;border-top:1px solid var(--border-color);">'
-      + pick
-      + '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + color + '" onclick="playMusic(\' + m.id + \')">' + escapeHtml(label) + '</span>'
-      + dur + acts + '</div>';
+    return '<div style="display:flex;align-items:center;gap:6px;padding:8px 0;border-top:1px solid var(--border-color);">'
+      + '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + color + '" onclick="playMusic(\'' + m.id + '\')">' + escapeHtml(label) + '</span>'
+      + '<button class="btn btn-secondary" style="padding:3px 8px;font-size:11px;" onclick="renameMusic(\'' + m.id + '\')">名</button>'
+      + '<button class="btn btn-danger" style="padding:3px 8px;font-size:11px;" onclick="removeMusic(' + i + ')">删</button>'
+      + '</div>';
   }).join('');
-  updateMusicMultiBtn();
 }
 
 function initMusicFab() {
