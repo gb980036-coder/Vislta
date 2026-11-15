@@ -3667,6 +3667,108 @@ function getCurrentSongs() {
   return l.songs;
 }
 
+
+var musicSel = {};
+var shuffleUsed = {};
+var shuffleHistory = [];
+
+function fmtDur(v) {
+  if (!v || !isFinite(v) || v <= 0) return '--:--';
+  var t = Math.round(v);
+  var m = Math.floor(t / 60);
+  var r = t % 60;
+  return m + ':' + (r < 10 ? '0' + r : r);
+}
+function selectedSongCount() {
+  var n = 0;
+  getCurrentSongs().forEach(function (s) { if (musicSel[s.id]) n++; });
+  return n;
+}
+function toggleMusicSel(id, on) {
+  if (on) musicSel[id] = 1; else delete musicSel[id];
+  updateMusicBatchBar();
+}
+function selectAllSongs() {
+  getCurrentSongs().forEach(function (s) { musicSel[s.id] = 1; });
+  renderMusicList();
+}
+function clearMusicSel() {
+  musicSel = {};
+  renderMusicList();
+}
+function deleteSelectedSongs() {
+  var songs = getCurrentSongs();
+  var n = songs.filter(function (s) { return musicSel[s.id]; }).length;
+  if (!n) { showToast('没选歌'); return; }
+  if (!confirm('删掉选中的 ' + n + ' 首？删了找不回来')) return;
+  var l = getCurrentList();
+  l.songs = songs.filter(function (s) { return !musicSel[s.id]; });
+  musicSel = {};
+  saveData();
+  renderMusicList();
+  renderMusicListSelect();
+  showToast('已删 ' + n + ' 首');
+}
+function ensureMusicBatchBar(list) {
+  var bar = document.getElementById('musicBatchBar');
+  if (bar) return bar;
+  bar = document.createElement('div');
+  bar.id = 'musicBatchBar';
+  bar.style.cssText = 'flex:0 0 auto;display:none;align-items:center;gap:6px;padding:6px 16px 2px;font-size:12px;';
+  list.parentNode.insertBefore(bar, list);
+  return bar;
+}
+function updateMusicBatchBar() {
+  var bar = document.getElementById('musicBatchBar');
+  if (!bar) return;
+  var songs = getCurrentSongs();
+  if (!songs.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  var n = selectedSongCount();
+  var html = '<span style="color:var(--text-secondary);">已选 ' + n + '</span>';
+  if (n) html += '<button class="btn btn-danger" style="padding:3px 10px;font-size:11px;" onclick="deleteSelectedSongs()">删</button>';
+  html += '<button class="btn btn-secondary" style="padding:3px 10px;font-size:11px;" onclick="selectAllSongs()">全选</button>';
+  if (n) html += '<button class="btn btn-secondary" style="padding:3px 10px;font-size:11px;" onclick="clearMusicSel()">取消</button>';
+  bar.innerHTML = html;
+  bar.style.display = 'flex';
+}
+
+function getMusicMode() {
+  var m = appData.settings ? appData.settings.musicMode : '';
+  if (m === 'one' || m === 'shuffle') return m;
+  return 'order';
+}
+function setMusicModeIcon() {
+  var btn = document.getElementById('musicModeBtn');
+  if (!btn) return;
+  var k = getMusicMode();
+  var icon = k === 'one' ? 'fa-redo' : (k === 'shuffle' ? 'fa-random' : 'fa-list-ol');
+  btn.innerHTML = '<i class="fas ' + icon + '"></i>';
+  btn.title = k === 'one' ? '单曲循环' : (k === 'shuffle' ? '随机播放' : '顺序播放');
+}
+function cycleMusicMode() {
+  var k = getMusicMode();
+  var n = k === 'order' ? 'one' : (k === 'one' ? 'shuffle' : 'order');
+  if (!appData.settings) appData.settings = {};
+  appData.settings.musicMode = n;
+  saveData();
+  setMusicModeIcon();
+  showToast(n === 'one' ? '单曲循环' : (n === 'shuffle' ? '随机播放' : '顺序播放'));
+}
+function playRandomSong() {
+  var list = getCurrentSongs().filter(function (m) { return !m.bad; });
+  if (!list.length) return;
+  var pool = list.filter(function (m) { return !shuffleUsed[m.id] && m.id !== appData.currentMusicId; });
+  if (!pool.length) {
+    shuffleUsed = {};
+    pool = list.filter(function (m) { return m.id !== appData.currentMusicId; });
+  }
+  if (!pool.length) pool = list;
+  var pick = pool[Math.floor(Math.random() * pool.length)];
+  shuffleUsed[pick.id] = 1;
+  if (appData.currentMusicId && appData.currentMusicId !== pick.id) shuffleHistory.push(appData.currentMusicId);
+  playMusic(pick.id);
+}
+
 function renderMusicListSelect() {
   const sel = document.getElementById('musicListSelect');
   if (!sel) return;
@@ -3814,22 +3916,31 @@ function probeList(list, concurrency) {
       return;
     }
     const s = queue[idx++];
-    probeOne(s.id).then(function (ok) {
+    probeOne(s.id).then(function (r) {
       done++;
-      if (ok === true) { s.probe = 1; delete s.bad; }
-      else if (ok === false) { s.probe = 1; s.bad = true; bad++; }
-      else { unknown++; }
+      if (r && r.ok === true) {
+        s.probe = 1;
+        delete s.bad;
+        if (r.dur && isFinite(r.dur) && r.dur > 0) s.dur = Math.round(r.dur);
+      } else if (r && r.ok === false) {
+        s.probe = 1;
+        s.bad = true;
+        bad++;
+      } else {
+        unknown++;
+      }
       if (done % 5 === 0 || done === queue.length) { saveData(); renderMusicList(); }
       next();
     });
   }
-  for (let k = 0; k < Math.min(concurrency, queue.length); k++) next();
+  for (let k = 0; k < Math.min(concurrency || 4, queue.length); k++) next();
 }
 
 function probeOne(id) {
   return new Promise(function (resolve) {
     var a = document.createElement('audio');
     var done = false;
+    var dur = 0;
     var timer = setTimeout(function () { fin(null); }, 15000);
     function fin(v) {
       if (done) return;
@@ -3838,36 +3949,21 @@ function probeOne(id) {
       a.onloadedmetadata = null;
       a.oncanplay = null;
       a.onerror = null;
+      try { if ((!dur || !isFinite(dur)) && a.duration && isFinite(a.duration)) dur = a.duration; } catch (e) {}
       try { a.pause(); } catch (e) {}
       a.removeAttribute('src');
-      resolve(v);
+      if (v === null) { resolve(null); return; }
+      resolve({ ok: v, dur: dur });
     }
     a.preload = 'metadata';
-    a.onloadedmetadata = function () { fin(true); };
+    a.onloadedmetadata = function () {
+      try { dur = a.duration; } catch (e) { dur = 0; }
+      fin(true);
+    };
     a.oncanplay = function () { fin(true); };
     a.onerror = function () { fin(false); };
     a.src = musicStreamUrl(id);
   });
-}
-
-function checkMusicList() {
-  const list = getCurrentList();
-  if (!list.songs || !list.songs.length) { showToast('这个歌单是空的'); return; }
-  list.songs.forEach(function (s) { delete s.probe; });
-  showToast('开始检查，别关页面');
-  probeList(list, 4);
-}
-
-function removeBadSongs() {
-  const list = getCurrentList();
-  if (!Array.isArray(list.songs)) return;
-  const before = list.songs.length;
-  list.songs = list.songs.filter(function (s) { return !s.bad; });
-  const n = before - list.songs.length;
-  saveData();
-  renderMusicList();
-  renderMusicListSelect();
-  showToast(n ? ('清掉 ' + n + ' 首') : '没有标记的');
 }
 
 function openMusicSheet() {
@@ -3875,6 +3971,7 @@ function openMusicSheet() {
   const mask = document.getElementById('musicMask');
   if (!panel) return;
   try { renderMusicListSelect(); renderMusicList(); } catch (e) { console.error('音乐列表渲染失败', e); }
+  try { setMusicModeIcon(); } catch (e) {}
   const curAu = document.getElementById('musicAudio');
   setMusicPlayIcon(!!curAu && !curAu.paused);
   if (mask) mask.style.display = 'block';
@@ -3993,12 +4090,33 @@ function playMusic(id) {
   const au = document.getElementById('musicAudio');
   if (au) {
     au.addEventListener('timeupdate', updateMusicProgress);
-    au.addEventListener('loadedmetadata', updateMusicProgress);
+    au.addEventListener('loadedmetadata', function () {
+      updateMusicProgress();
+      if (!isCur()) return;
+      try {
+        if (au.duration && isFinite(au.duration) && au.duration > 0) {
+          var s0 = null;
+          getCurrentSongs().forEach(function (x) { if (x.id === id) s0 = x; });
+          var d0 = Math.round(au.duration);
+          if (s0 && s0.dur !== d0) { s0.dur = d0; saveData(); renderMusicList(); }
+        }
+      } catch (e) {}
+    });
     const isCur = function () { return document.getElementById('musicAudio') === au; };
     au.addEventListener('play', function () { if (isCur()) setMusicPlayIcon(true); });
     au.addEventListener('playing', function () { if (isCur()) setMusicPlayIcon(true); });
     au.addEventListener('pause', function () { if (isCur()) setMusicPlayIcon(false); });
-    au.addEventListener('ended', function () { if (isCur()) musicNext(); });
+    au.addEventListener('ended', function () {
+      if (!isCur()) return;
+      if (getMusicMode() === 'one') {
+        try { au.currentTime = 0; } catch (e) {}
+        var pp = au.play();
+        if (pp && pp.catch) pp.catch(function () {});
+        setMusicPlayIcon(true);
+        return;
+      }
+      musicNext();
+    });
     au.addEventListener('error', function () {
       setMusicPlayIcon(false);
       const songs = getCurrentSongs();
@@ -4039,8 +4157,17 @@ function musicStep(delta) {
   playMusic(list[i].id);
 }
 
-function musicPrev() { musicStep(-1); }
-function musicNext() { musicStep(1); }
+function musicPrev() {
+  if (getMusicMode() === 'shuffle' && shuffleHistory.length) {
+    playMusic(shuffleHistory.pop());
+    return;
+  }
+  musicStep(-1);
+}
+function musicNext() {
+  if (getMusicMode() === 'shuffle') { playRandomSong(); return; }
+  musicStep(1);
+}
 
 function renameMusic(id) {
   let m = null;
@@ -4067,20 +4194,27 @@ function renderMusicList() {
   const list = document.getElementById('musicList');
   if (!list) return;
   const songs = getCurrentSongs();
+  ensureMusicBatchBar(list);
   if (!songs.length) {
+    musicSel = {};
     list.innerHTML = '<div style="font-size:12px;color:var(--text-tertiary);padding:8px 0;">这个歌单还空着。上面贴链接，或者点“导入”</div>';
+    updateMusicBatchBar();
     return;
   }
   list.innerHTML = songs.map(function (m, i) {
     const active = m.id === appData.currentMusicId;
     const color = active ? 'color:var(--accent-color,#3a7bd5);font-weight:600;' : (m.bad ? 'color:var(--text-tertiary);text-decoration:line-through;' : '');
     const label = (m.bad ? '✕ ' : '') + m.name + (m.artist ? ' - ' + m.artist : '');
+    const checked = musicSel[m.id] ? ' checked' : '';
     return '<div style="display:flex;align-items:center;gap:6px;padding:8px 0;border-top:1px solid var(--border-color);">'
+      + '<input type="checkbox" style="flex:0 0 auto;width:15px;height:15px;margin:0;accent-color:#4f8ef7;"' + checked + ' onchange="toggleMusicSel(\'' + m.id + '\', this.checked)">'
       + '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + color + '" onclick="playMusic(\'' + m.id + '\')">' + escapeHtml(label) + '</span>'
+      + '<span style="flex:0 0 auto;font-size:11px;color:var(--text-tertiary);">' + fmtDur(m.dur) + '</span>'
       + '<button class="btn btn-secondary" style="padding:3px 8px;font-size:11px;" onclick="renameMusic(\'' + m.id + '\')">名</button>'
       + '<button class="btn btn-danger" style="padding:3px 8px;font-size:11px;" onclick="removeMusic(' + i + ')">删</button>'
       + '</div>';
   }).join('');
+  updateMusicBatchBar();
 }
 
 function initMusicFab() {
