@@ -1763,8 +1763,8 @@ function viewContactInfo() {
   
   const body = `
     <div style="text-align:center;margin-bottom:14px;">
-      ${getAvatarHTML(contact.avatar, contact.name, 'lg')}
-      <div style="font-size:18px;font-weight:500;margin-top:10px;">${contact.name}</div>
+      <div id="profileAvatarWrap" onclick="pickAvatarFor('contact','${contact.id}')" title="点一下换头像">${getAvatarHTML(contact.avatar, contact.name, 'lg')}</div>
+      <div id="profileNameText" style="font-size:18px;font-weight:500;margin-top:10px;cursor:pointer;" onclick="renameProfile('contact','${contact.id}')" title="点一下改名">${contact.name}</div>
       <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">${contact.status || '暂无签名'}</div>
       <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">分组：${contact.group} · 钱包 ¥${fmtMoney(getContactWallet(contact.id))}</div>
     </div>
@@ -1773,6 +1773,9 @@ function viewContactInfo() {
       <div class="profile-quick-btn" onclick="closeModal(currentModalId);switchPage('settings');openPanelById('notesCollapsible');switchNotesTab('notes')"><i class="fas fa-pen-nib"></i>记事本</div>
       <div class="profile-quick-btn" onclick="closeModal(currentModalId);switchPage('settings');openPanelById('notesCollapsible');switchNotesTab('todos')"><i class="fas fa-list-check"></i>待办</div>
       <div class="profile-quick-btn" onclick="openContactWalletModal('${contact.id}')"><i class="fas fa-wallet"></i>钱包</div>
+    </div>
+    <div class="ring-set-row"><label>TA 的心动</label>
+      <button class="btn btn-secondary" style="margin-left:auto;padding:4px 12px;font-size:12px;" onclick="openTaHeart('${contact.id}')">看看 ♥</button>
     </div>
     <div class="ring-set-row"><label>来电铃声</label>
       <select onchange="setContactRingtone('${contact.id}','ringtoneCall',this.value)">
@@ -3650,6 +3653,11 @@ function ensureMusicLists() {
     appData.musicLists = [{ id: 'list_default', name: '我的歌单', songs: (appData.music || []).slice() }];
     appData.currentListId = 'list_default';
   }
+  const hasLove = appData.musicLists.some(function (l) { return l.id === 'list_love'; });
+  if (!hasLove) {
+    appData.musicLists.push({ id: 'list_love', name: '♥心动', songs: [] });
+  }
+  appData.musicLists.forEach(function (l) { if (l.id === 'list_love') l.name = '♥心动'; });
   if (!appData.currentListId || !appData.musicLists.some(function (l) { return l.id === appData.currentListId; })) {
     appData.currentListId = appData.musicLists[0].id;
   }
@@ -3701,6 +3709,7 @@ function deleteSelectedSongs() {
   var n = songs.filter(function (s) { return musicSel[s.id]; }).length;
   if (!n) { showToast('没选歌'); return; }
   if (!confirm('删掉选中的 ' + n + ' 首？删了找不回来')) return;
+  musicDeleteMode = false;
   var l = getCurrentList();
   l.songs = songs.filter(function (s) { return !musicSel[s.id]; });
   musicSel = {};
@@ -3722,12 +3731,12 @@ function updateMusicBatchBar() {
   var bar = document.getElementById('musicBatchBar');
   if (!bar) return;
   var songs = getCurrentSongs();
-  if (!songs.length) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
+  if (!songs.length || !musicDeleteMode) { bar.style.display = 'none'; bar.innerHTML = ''; return; }
   var n = selectedSongCount();
   var html = '<span style="color:var(--text-secondary);">已选 ' + n + '</span>';
-  if (n) html += '<button class="btn btn-danger" style="padding:3px 10px;font-size:11px;" onclick="deleteSelectedSongs()">删</button>';
   html += '<button class="btn btn-secondary" style="padding:3px 10px;font-size:11px;" onclick="selectAllSongs()">全选</button>';
-  if (n) html += '<button class="btn btn-secondary" style="padding:3px 10px;font-size:11px;" onclick="clearMusicSel()">取消</button>';
+  if (n) html += '<button class="btn btn-danger" style="padding:3px 10px;font-size:11px;" onclick="deleteSelectedSongs()">删掉</button>';
+  html += '<button class="btn btn-secondary" style="padding:3px 10px;font-size:11px;" onclick="toggleMusicDeleteMode()">退出</button>';
   bar.innerHTML = html;
   bar.style.display = 'flex';
 }
@@ -3769,6 +3778,149 @@ function playRandomSong() {
   playMusic(pick.id);
 }
 
+// ==================== v32：心动 / 资料编辑 / 删除锁 ====================
+var musicDeleteMode = false;
+
+function loveList() {
+  ensureMusicLists();
+  return appData.musicLists.find(function (l) { return l.id === 'list_love'; });
+}
+function isLoved(id) {
+  var l = loveList();
+  if (!l || !Array.isArray(l.songs)) return false;
+  return l.songs.some(function (s) { return s.id === id; });
+}
+function findSongAnywhere(id) {
+  var out = null;
+  (appData.musicLists || []).forEach(function (l) {
+    if (l.id === 'list_love') return;
+    (l.songs || []).forEach(function (s) { if (!out && s.id === id) out = s; });
+  });
+  return out;
+}
+function toggleLove(id) {
+  var l = loveList();
+  if (!l) return;
+  if (!Array.isArray(l.songs)) l.songs = [];
+  var idx = -1;
+  l.songs.forEach(function (s, i) { if (s.id === id) idx = i; });
+  if (idx >= 0) {
+    l.songs.splice(idx, 1);
+    showToast('从心动里拿掉了');
+  } else {
+    var src = findSongAnywhere(id);
+    if (!src) return;
+    var copy = { id: src.id, name: src.name, artist: src.artist || '', dur: src.dur || 0 };
+    if (src.bad) copy.bad = true;
+    l.songs.push(copy);
+    showToast('放进心动里了 ♥');
+  }
+  saveData();
+  renderMusicList();
+  renderMusicListSelect();
+}
+function toggleMusicDeleteMode() {
+  musicDeleteMode = !musicDeleteMode;
+  musicSel = {};
+  renderMusicList();
+  showToast(musicDeleteMode ? '勾要删的歌，然后点“删掉”' : '退出删除模式');
+}
+
+function profileObj(kind, id) {
+  if (kind === 'group') return appData.groups.find(function (g) { return g.id === id; });
+  return appData.contacts.find(function (c) { return c.id === id; });
+}
+function pickAvatarFor(kind, id) {
+  var obj = profileObj(kind, id);
+  if (!obj) return;
+  var inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.onchange = function () {
+    var f = inp.files && inp.files[0];
+    if (!f) return;
+    var r = new FileReader();
+    r.onload = function () {
+      obj.avatar = r.result;
+      saveData();
+      try { renderConversations(); } catch (e) {}
+      try { renderContacts(); } catch (e) {}
+      var w = document.getElementById('profileAvatarWrap');
+      if (w) w.innerHTML = (kind === 'group') ? getGroupAvatarHTML(obj) : getAvatarHTML(obj.avatar, obj.name, 'lg');
+      showToast('头像换好了');
+    };
+    r.readAsDataURL(f);
+  };
+  inp.click();
+}
+function renameProfile(kind, id) {
+  var obj = profileObj(kind, id);
+  if (!obj) return;
+  var n = prompt(kind === 'group' ? '群名称' : '昵称', obj.name || '');
+  if (n === null) return;
+  n = n.trim();
+  if (!n) { showToast('名字不能空着'); return; }
+  obj.name = n;
+  saveData();
+  try { renderConversations(); } catch (e) {}
+  try { renderContacts(); } catch (e) {}
+  var el = document.getElementById('profileNameText');
+  if (el) el.textContent = n;
+  var t = document.getElementById('chatTitle');
+  if (t && appData.currentChatId === obj.id) t.textContent = n;
+  showToast('改好了');
+}
+
+function ensureTaHeart(contact) {
+  if (!contact) return [];
+  if (Array.isArray(contact.taHeart) && contact.taHeart.length) return contact.taHeart;
+  var pool = [];
+  (appData.musicLists || []).forEach(function (l) {
+    if (l.id === 'list_love') return;
+    (l.songs || []).forEach(function (s) {
+      if (s.bad) return;
+      var dup = pool.some(function (x) { return x.id === s.id; });
+      if (!dup) pool.push({ id: s.id, name: s.name, artist: s.artist || '', dur: s.dur || 0 });
+    });
+  });
+  if (!pool.length) return [];
+  var n = Math.min(pool.length, 3 + Math.floor(Math.random() * 3));
+  var out = [];
+  for (var i = 0; i < n; i++) {
+    var k = Math.floor(Math.random() * pool.length);
+    out.push(pool.splice(k, 1)[0]);
+  }
+  contact.taHeart = out;
+  saveData();
+  return out;
+}
+function openTaHeart(contactId) {
+  var contact = appData.contacts.find(function (c) { return c.id === contactId; });
+  if (!contact) return;
+  var arr = ensureTaHeart(contact);
+  var body = '';
+  if (!arr.length) {
+    body = '<div style="font-size:12px;color:var(--text-tertiary);padding:10px 0;">你自己的歌单还空着，TA 没什么可心动的。</div>';
+  } else {
+    body = '<div style="font-size:12px;color:var(--text-tertiary);padding:0 0 8px;">TA 的心动。只能听，改不了。</div>'
+      + arr.map(function (s) {
+        return '<div style="display:flex;align-items:center;gap:8px;padding:9px 0;border-top:1px solid var(--border-color);" onclick="playMusic(\'' + s.id + '\')">'
+          + '<span style="flex:0 0 auto;color:#e8456a;font-size:14px;">♥</span>'
+          + '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(s.name + (s.artist ? ' - ' + s.artist : '')) + '</span>'
+          + '<span style="flex:0 0 auto;font-size:11px;color:var(--text-tertiary);">' + fmtDur(s.dur) + '</span>'
+          + '</div>';
+      }).join('');
+  }
+  var footer = '<button class="btn btn-secondary" onclick="closeModal(currentModalId)">关闭</button>';
+  window.currentModalId = showModal(contact.name + '的心动', body, footer);
+}
+function openTaHeartForCurrent() {
+  if (!appData.currentChatId || appData.currentChatType !== 'contact') { showToast('群聊没有心动列表'); return; }
+  var cid = appData.currentChatId;
+  try { closeModal(window.currentModalId); } catch (e) {}
+  setTimeout(function () { openTaHeart(cid); }, 80);
+}
+
 function renderMusicListSelect() {
   const sel = document.getElementById('musicListSelect');
   if (!sel) return;
@@ -3802,6 +3954,7 @@ function newMusicList() {
 
 function renameMusicList() {
   const l = getCurrentList();
+  if (l.id === 'list_love') { showToast('心动歌单不用改名'); return; }
   const n = prompt('歌单名字', l.name || '');
   if (n === null) return;
   l.name = n.trim() || l.name;
@@ -3812,6 +3965,7 @@ function renameMusicList() {
 function deleteMusicList() {
   ensureMusicLists();
   const l = getCurrentList();
+  if (l.id === 'list_love') { showToast('心动歌单删不了'); return; }
   if (!confirm('删掉歌单“' + l.name + '”？里面的歌也没有了')) return;
   appData.musicLists = appData.musicLists.filter(function (x) { return x.id !== l.id; });
   if (!appData.musicLists.length) {
@@ -4194,10 +4348,11 @@ function renderMusicList() {
   const list = document.getElementById('musicList');
   if (!list) return;
   const songs = getCurrentSongs();
+  const isLoveList = appData.currentListId === 'list_love';
   ensureMusicBatchBar(list);
   if (!songs.length) {
     musicSel = {};
-    list.innerHTML = '<div style="font-size:12px;color:var(--text-tertiary);padding:8px 0;">这个歌单还空着。上面贴链接，或者点“导入”</div>';
+    list.innerHTML = '<div style="font-size:12px;color:var(--text-tertiary);padding:8px 0;">' + (isLoveList ? '还没点过心。点歌后面的 ♡，它就进来了。' : '这个歌单还空着。上面贴链接，或者点“导入”') + '</div>';
     updateMusicBatchBar();
     return;
   }
@@ -4205,12 +4360,14 @@ function renderMusicList() {
     const active = m.id === appData.currentMusicId;
     const color = active ? 'color:var(--accent-color,#3a7bd5);font-weight:600;' : (m.bad ? 'color:var(--text-tertiary);text-decoration:line-through;' : '');
     const label = (m.bad ? '✕ ' : '') + m.name + (m.artist ? ' - ' + m.artist : '');
-    const checked = musicSel[m.id] ? ' checked' : '';
+    const loved = isLoved(m.id);
+    const cb = musicDeleteMode ? ('<input type="checkbox" style="flex:0 0 auto;width:15px;height:15px;margin:0;accent-color:#4f8ef7;"' + (musicSel[m.id] ? ' checked' : '') + ' onchange="toggleMusicSel(\'' + m.id + '\', this.checked)">') : '';
     return '<div style="display:flex;align-items:center;gap:6px;padding:8px 0;border-top:1px solid var(--border-color);">'
-      + '<input type="checkbox" style="flex:0 0 auto;width:15px;height:15px;margin:0;accent-color:#4f8ef7;"' + checked + ' onchange="toggleMusicSel(\'' + m.id + '\', this.checked)">'
+      + cb
+      + '<span style="flex:0 0 auto;font-size:16px;line-height:1;padding:0 2px;cursor:pointer;color:' + (loved ? '#e8456a' : 'var(--text-tertiary)') + ';" onclick="toggleLove(\'' + m.id + '\')" title="心动">' + (loved ? '♥' : '♡') + '</span>'
       + '<span style="flex:1;min-width:0;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;' + color + '" onclick="playMusic(\'' + m.id + '\')">' + escapeHtml(label) + '</span>'
       + '<span style="flex:0 0 auto;font-size:11px;color:var(--text-tertiary);">' + fmtDur(m.dur) + '</span>'
-      + '<button class="btn btn-secondary" style="padding:3px 8px;font-size:11px;" onclick="renameMusic(\'' + m.id + '\')">名</button>'
+      + (isLoveList ? '' : '<button class="btn btn-secondary" style="padding:3px 8px;font-size:11px;" onclick="renameMusic(\'' + m.id + '\')">名</button>')
       + '<button class="btn btn-danger" style="padding:3px 8px;font-size:11px;" onclick="removeMusic(' + i + ')">删</button>'
       + '</div>';
   }).join('');
@@ -5878,8 +6035,8 @@ function onContactClick(contactId) {
   
   const body = `
     <div style="text-align:center;margin-bottom:14px;">
-      ${getAvatarHTML(contact.avatar, contact.name, 'lg')}
-      <div style="font-size:18px;font-weight:500;margin-top:10px;">${contact.name}</div>
+      <div id="profileAvatarWrap" onclick="pickAvatarFor('contact','${contact.id}')" title="点一下换头像">${getAvatarHTML(contact.avatar, contact.name, 'lg')}</div>
+      <div id="profileNameText" style="font-size:18px;font-weight:500;margin-top:10px;cursor:pointer;" onclick="renameProfile('contact','${contact.id}')" title="点一下改名">${contact.name}</div>
       <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">${contact.status || '暂无签名'}</div>
       <div style="font-size:12px;color:var(--text-tertiary);margin-top:4px;">分组：${contact.group || '未分组'} · 钱包 ¥${fmtMoney(getContactWallet(contactId))}</div>
     </div>
@@ -5888,6 +6045,9 @@ function onContactClick(contactId) {
       <div class="profile-quick-btn" onclick="closeModal(currentModalId);switchPage('settings');openPanelById('notesCollapsible');switchNotesTab('notes')"><i class="fas fa-pen-nib"></i>记事本</div>
       <div class="profile-quick-btn" onclick="closeModal(currentModalId);switchPage('settings');openPanelById('notesCollapsible');switchNotesTab('todos')"><i class="fas fa-list-check"></i>待办</div>
       <div class="profile-quick-btn" onclick="openContactWalletModal('${contactId}')"><i class="fas fa-wallet"></i>钱包</div>
+    </div>
+    <div class="ring-set-row"><label>TA 的心动</label>
+      <button class="btn btn-secondary" style="margin-left:auto;padding:4px 12px;font-size:12px;" onclick="openTaHeart('${contact.id}')">看看 ♥</button>
     </div>
     <div class="ring-set-row"><label>来电铃声</label>
       <select onchange="setContactRingtone('${contactId}','ringtoneCall',this.value)">
@@ -5928,8 +6088,8 @@ function onGroupClick(groupId) {
   
   const body = `
     <div style="text-align:center;margin-bottom:14px;">
-      <div style="display:flex;justify-content:center;">${getGroupAvatarHTML(group)}</div>
-      <div style="font-size:18px;font-weight:500;margin-top:10px;">${group.name}</div>
+      <div id="profileAvatarWrap" style="display:flex;justify-content:center;" onclick="pickAvatarFor('group','${group.id}')" title="点一下换群头像">${getGroupAvatarHTML(group)}</div>
+      <div id="profileNameText" style="font-size:18px;font-weight:500;margin-top:10px;cursor:pointer;" onclick="renameProfile('group','${group.id}')" title="点一下改群名">${group.name}</div>
       <div style="font-size:13px;color:var(--text-secondary);margin-top:4px;">${group.memberIds.length} 位成员</div>
       <div style="font-size:12px;color:var(--text-tertiary);margin-top:8px;line-height:1.5;">成员：${memberNames || '暂无成员'}</div>
     </div>

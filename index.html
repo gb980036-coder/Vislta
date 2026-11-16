@@ -71,6 +71,7 @@
                 <div class="dropdown-item" onclick="pokeContact()"><i class="fas fa-hand-pointer"></i>戳一戳</div>
                 <div class="dropdown-item" onclick="openChatSettingsHub()"><i class="fas fa-cog"></i>设置中心</div>
                 <div class="dropdown-item" onclick="viewContactInfo()"><i class="fas fa-info-circle"></i>查看资料</div>
+                <div class="dropdown-item" onclick="openTaHeartForCurrent()"><i class="fas fa-heart" style="color:#e8456a;"></i>TA 的心动</div>
                 <div class="dropdown-item danger" onclick="clearChatHistory()"><i class="fas fa-trash"></i>清空聊天记录</div>
               </div>
             </div>
@@ -1291,11 +1292,12 @@
   <div style="flex:0 0 auto;display:flex;gap:6px;padding:0 12px 12px;">
     <button class="btn btn-secondary" style="flex:1;padding:6px 4px;font-size:11px;" onclick="checkMusicList()">检查</button>
     <button class="btn btn-secondary" style="flex:1;padding:6px 4px;font-size:11px;" onclick="removeBadSongs()">清✕</button>
+    <button class="btn btn-danger" style="flex:1;padding:6px 4px;font-size:11px;" onclick="toggleMusicDeleteMode()">删歌</button>
     <button class="btn btn-secondary" style="flex:1;padding:6px 4px;font-size:11px;" onclick="renameMusicList()">改名</button>
     <button class="btn btn-danger" style="flex:1;padding:6px 4px;font-size:11px;" onclick="deleteMusicList()">删歌单</button>
   </div>
 </div>
 
-<script src="app.js?v=31"></script>
+<script src="app.js?v=32"></script>
 </body>
 </html>
