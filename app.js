@@ -5921,22 +5921,210 @@ function jumpToSettingsPanel(panelId) {
 
 function openSurveyQuickMenu() {
   if (!appData.currentChatId) { showToast('请先选择一个会话'); return; }
-  const body = `
-    <div style="display:flex;flex-direction:column;gap:10px;">
-      <button class="btn btn-primary" style="width:100%;padding:10px;" onclick="closeModal(currentModalId);sendSurveyToContact();">
-        <i class="fas fa-paper-plane"></i> 发送编辑器问卷
-      </button>
-      <button class="btn btn-secondary" style="width:100%;padding:10px;" onclick="closeModal(currentModalId);openMySurveyPicker();">
-        <i class="fas fa-clipboard-list"></i> 从我方库选发
-      </button>
-      <button class="btn btn-secondary" style="width:100%;padding:10px;" onclick="closeModal(currentModalId);openSurveyFromContactPicker();">
-        <i class="fas fa-inbox"></i> 让对方选择发送
-      </button>
-      <div class="setting-desc" style="font-size:11px;text-align:center;">编辑器与问卷库在「设置 → 调查问卷」中管理</div>
-    </div>
-  `;
-  window.currentModalId = showModal('发送问卷', body);
+  openChatSurveyEditor(null);
 }
+// ==================== 聊天页内联问卷编辑器（v34.4） ====================
+let chatSurveyEditData = [];
+let chatSurveyEditId = null;
+let chatSurveyModalId = null;
+
+function openChatSurveyEditor(item) {
+  if (!appData.currentChatId) { showToast('请先选择一个会话'); return; }
+  if (chatSurveyModalId) { const old = document.getElementById(chatSurveyModalId); if (old) old.remove(); chatSurveyModalId = null; }
+
+  chatSurveyEditId = item && item.id ? item.id : null;
+  chatSurveyEditData = item
+    ? JSON.parse(JSON.stringify(item.questions || []))
+    : [{ text: '', type: 'single', options: ['', ''] }];
+
+  const body = `
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+      <span style="font-size:12px;color:var(--text-tertiary);">写完点发送，直接进聊天</span>
+      <button class="survey-add-btn" style="padding:5px 10px;font-size:12px;margin:0;" onclick="chatSurveyPickFromLib()"><i class="fas fa-folder-open"></i> 从库导入</button>
+    </div>
+    <div class="form-group">
+      <label>问卷标题</label>
+      <input type="text" class="input" id="chatSurveyTitle" value="${escapeAttr(item ? item.title || '' : '')}" placeholder="输入问卷标题">
+    </div>
+    <div id="chatSurveyEditList"></div>
+    <button class="survey-add-btn" onclick="chatSurveyAddQ()"><i class="fas fa-plus"></i> 添加问题</button>
+  `;
+  const footer = `
+    <button class="btn btn-secondary" onclick="chatSurveyClose()">取消</button>
+    <button class="btn btn-secondary" onclick="chatSurveySaveOnly()">存库</button>
+    <button class="btn btn-primary" onclick="chatSurveySend()">发送</button>
+  `;
+  chatSurveyModalId = showModal('编写问卷', body, footer);
+  window.currentModalId = chatSurveyModalId;
+  renderChatSurveyEditor();
+}
+
+function chatSurveyClose() {
+  if (chatSurveyModalId) closeModal(chatSurveyModalId);
+  chatSurveyModalId = null;
+}
+
+function renderChatSurveyEditor() {
+  const list = document.getElementById('chatSurveyEditList');
+  if (!list) return;
+  if (chatSurveyEditData.length === 0) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--text-tertiary);padding:4px 0 10px;">还没加题目，点下面「添加问题」</div>';
+    return;
+  }
+  list.innerHTML = chatSurveyEditData.map((q, qi) => `
+    <div class="survey-editor-q" data-qtype="${q.type || 'single'}">
+      <div class="q-head">
+        <span style="font-size:12px;color:var(--primary);font-weight:600;flex-shrink:0;">Q${qi + 1}</span>
+        <input type="text" class="input" placeholder="输入问题" value="${escapeAttr(q.text || '')}" oninput="chatSurveyQText(${qi}, this.value)">
+        <select class="q-type-sel" onchange="chatSurveyQType(${qi}, this.value)">
+          <option value="single" ${(!q.type || q.type === 'single') ? 'selected' : ''}>单选</option>
+          <option value="multi" ${q.type === 'multi' ? 'selected' : ''}>多选</option>
+          <option value="text" ${q.type === 'text' ? 'selected' : ''}>填空</option>
+        </select>
+        <div class="opt-del" title="删除问题" onclick="chatSurveyDelQ(${qi})"><i class="fas fa-trash"></i></div>
+      </div>
+      ${(q.options || []).map((opt, oi) => `
+        <div class="survey-opt-row">
+          <span class="opt-idx">${oi + 1}</span>
+          <input type="text" class="input" placeholder="选项内容" value="${escapeAttr(opt)}" oninput="chatSurveyOpt(${qi}, ${oi}, this.value)">
+          <div class="opt-del" onclick="chatSurveyDelOpt(${qi}, ${oi})"><i class="fas fa-times"></i></div>
+        </div>
+      `).join('')}
+      <button class="survey-add-btn" onclick="chatSurveyAddOpt(${qi})"><i class="fas fa-plus"></i> 添加选项</button>
+    </div>
+  `).join('');
+}
+
+function chatSurveyAddQ() {
+  chatSurveyEditData.push({ text: '', type: 'single', options: ['', ''] });
+  renderChatSurveyEditor();
+}
+function chatSurveyDelQ(qi) {
+  chatSurveyEditData.splice(qi, 1);
+  renderChatSurveyEditor();
+}
+function chatSurveyQText(qi, val) {
+  if (chatSurveyEditData[qi]) chatSurveyEditData[qi].text = val;
+}
+function chatSurveyQType(qi, val) {
+  const q = chatSurveyEditData[qi];
+  if (!q) return;
+  q.type = val;
+  if (val !== 'text' && (!q.options || q.options.length < 2)) q.options = ['', ''];
+  renderChatSurveyEditor();
+}
+function chatSurveyOpt(qi, oi, val) {
+  const q = chatSurveyEditData[qi];
+  if (q && q.options) q.options[oi] = val;
+}
+function chatSurveyAddOpt(qi) {
+  const q = chatSurveyEditData[qi];
+  if (!q) return;
+  if (!q.options) q.options = [];
+  q.options.push('');
+  renderChatSurveyEditor();
+}
+function chatSurveyDelOpt(qi, oi) {
+  const q = chatSurveyEditData[qi];
+  if (!q || !q.options) return;
+  q.options.splice(oi, 1);
+  renderChatSurveyEditor();
+}
+
+function buildChatSurveyPayload() {
+  const titleEl = document.getElementById('chatSurveyTitle');
+  const title = (titleEl ? titleEl.value : '').trim() || '调查问卷';
+  const questions = chatSurveyEditData
+    .map(q => ({
+      text: (q.text || '').trim(),
+      type: q.type || 'single',
+      options: (q.options || []).map(o => (o || '').trim()).filter(o => o)
+    }))
+    .filter(q => q.text && (q.type === 'text' || q.options.length >= 2));
+
+  if (questions.length === 0) {
+    showToast('至少写一道完整的题（题目+两个选项）');
+    return null;
+  }
+  return { title, questions };
+}
+
+function chatSurveyStore(survey) {
+  const lib = getMySurveyLibrary();
+  if (chatSurveyEditId) {
+    const item = lib.find(i => i.id === chatSurveyEditId);
+    if (item) {
+      item.title = survey.title;
+      item.questions = JSON.parse(JSON.stringify(survey.questions));
+      item.enabled = true;
+      saveData();
+      return;
+    }
+  }
+  const id = generateId();
+  lib.push({ id, title: survey.title, questions: JSON.parse(JSON.stringify(survey.questions)), enabled: true });
+  chatSurveyEditId = id;
+  saveData();
+}
+
+function chatSurveySaveOnly() {
+  const survey = buildChatSurveyPayload();
+  if (!survey) return;
+  chatSurveyStore(survey);
+  if (typeof renderMySurveyLibrary === 'function') renderMySurveyLibrary();
+  showToast('已存进我方问卷库');
+}
+
+function chatSurveySend() {
+  const survey = buildChatSurveyPayload();
+  if (!survey) return;
+  chatSurveyClose();
+  dispatchChatSurvey(survey);
+}
+
+function dispatchChatSurvey(survey) {
+  if (!appData.currentChatId) { showToast('请先选择一个会话'); return; }
+  const targetType = appData.currentChatType;
+  const targetId = appData.currentChatId;
+  const myMsg = {
+    type: 'survey',
+    content: '[问卷] ' + survey.title,
+    sender: getSelfId(),
+    time: Date.now(),
+    survey
+  };
+  addMessage(myMsg);
+  showToast('问卷已发送，等待对方作答');
+  schedulePeerSurveyAnswer(targetType, targetId, myMsg, survey);
+}
+
+function chatSurveyPickFromLib() {
+  const lib = getMySurveyLibrary();
+  if (!lib.length) { showToast('我方问卷库还是空的'); return; }
+  const body = `
+    <div class="call-picker-tip">选一份载进来继续改</div>
+    ${lib.map(item => `
+      <button class="survey-pick-card" onclick="chatSurveyLoadLib('${item.id}')">
+        <div class="pick-icon"><i class="fas fa-file-alt"></i></div>
+        <div class="pick-info">
+          <div class="pick-title">${escapeHtml(item.title || '未命名问卷')}</div>
+          <div class="pick-meta">${(item.questions || []).length} 道题 · 点击载入</div>
+        </div>
+        <i class="fas fa-download pick-go"></i>
+      </button>
+    `).join('')}
+  `;
+  const pickId = showModal('从库导入', body);
+  pickIdRef = pickId;
+}
+let pickIdRef = null;
+function chatSurveyLoadLib(id) {
+  const item = getMySurveyLibrary().find(i => i.id === id);
+  if (pickIdRef) { closeModal(pickIdRef); pickIdRef = null; }
+  if (!item) { showToast('问卷不见了'); return; }
+  openChatSurveyEditor(item);
+}
+
 
 // 从我方问卷库中选择发送
 function openMySurveyPicker() {
