@@ -5790,3 +5790,53 @@ input[type=range].vol-slider { width: 100%; accent-color: var(--primary); }
     color-mix(in srgb, var(--header-bg) 62%, transparent) 58%,
     color-mix(in srgb, var(--header-bg) 22%, transparent) 100%);
 }
+
+
+/* ===== v33.2 顶部重做：背景图铺到最顶，顶栏不再是一条实色 ===== */
+
+/* 整页自己承担安全区，交给各自的顶栏 */
+#app { padding-top: 0; }
+
+.chat-header {
+  height: calc(52px + env(safe-area-inset-top, 0px));
+  padding-top: env(safe-area-inset-top, 0px);
+  box-sizing: border-box;
+}
+.page-header {
+  height: calc(50px + env(safe-area-inset-top, 0px));
+  padding-top: env(safe-area-inset-top, 0px);
+  box-sizing: border-box;
+}
+.contacts-header {
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  box-sizing: border-box;
+}
+.letters-header {
+  padding-top: calc(14px + env(safe-area-inset-top, 0px));
+  box-sizing: border-box;
+}
+.sidebar-header {
+  padding-top: calc(12px + env(safe-area-inset-top, 0px));
+  box-sizing: border-box;
+}
+
+/* 顶栏：几乎透明的一层雾，背景图透上来 */
+.chat-header,
+.page-header,
+.contacts-header,
+.letters-header,
+.sidebar-header {
+  background: linear-gradient(to bottom,
+    color-mix(in srgb, var(--bg-primary) 34%, transparent) 0%,
+    color-mix(in srgb, var(--bg-primary) 14%, transparent) 55%,
+    transparent 100%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+  border-bottom: 0;
+  box-shadow: none;
+}
+
+/* 设置页、朋友圈没有顶栏，安全区那截保持原色，不空一块 */
+#settingsPage .settings-list {
+  padding-top: calc(14px + env(safe-area-inset-top, 0px));
+}
