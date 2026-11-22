@@ -5840,3 +5840,34 @@ input[type=range].vol-slider { width: 100%; accent-color: var(--primary); }
 #settingsPage .settings-list {
   padding-top: calc(14px + env(safe-area-inset-top, 0px));
 }
+
+
+/* ===== v33.3 顶栏不做任何着色，背景图直接铺到最顶 ===== */
+.chat-header,
+.page-header,
+.contacts-header,
+.letters-header,
+.sidebar-header {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  border-bottom: 0;
+  box-shadow: none;
+}
+
+/* 字压在图上，给一点点影子，保证看得清 */
+.chat-header,
+.page-header,
+.contacts-header,
+.letters-header,
+.sidebar-header {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.10);
+}
+
+/* 页面底色和聊天底色统一，任何边角都不会露出别的色 */
+html, body {
+  background: var(--bg-chat, var(--bg-primary));
+}
+#app {
+  background: var(--bg-chat, var(--bg-primary));
+}
