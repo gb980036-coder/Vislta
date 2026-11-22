@@ -20,6 +20,9 @@ const defaultAppData = {
   statusWords: ['在线', '忙碌', '离开', '请勿打扰', '手机在线', '电脑在线'],
   settings: {
     darkMode: false,
+    customColorLight: '',
+    customColorDark: '',
+    customBubbleCss: '',
     autoTheme: false,
     themeColor: 'blue',
     bubbleStyle: 'standard',
@@ -63,7 +66,14 @@ const defaultAppData = {
     letterWordCountMin: 3,
     letterWordCountMax: 5,
     statusInterval: 30,
+    incomingLetterEnabled: false,
+    incomingLetterMinH: 2,
+    incomingLetterMaxH: 72,
+    incomingLetterWhitelist: [],
     autoCall: false,
+    autoCallChance: 40,
+    autoCallMinMin: 120,
+    autoCallMaxMin: 720,
     dndEnabled: false,
     dndStart: '22:00',
     dndEnd: '08:00',
@@ -302,14 +312,104 @@ function loadData() {
 }
 
 let __saveTimer = null;
+// ===== 32 IndexedDB 大容量存储 =====
+const IDB_NAME = 'vislta_db';
+const IDB_STORE = 'kv';
+const IDB_FLAG = 'vislta_idb_flag';
+let __idb = null;
+let __idbMode = false;
+function openIDB() {
+  return new Promise(function (res, rej) {
+    if (__idb) return res(__idb);
+    if (typeof indexedDB === 'undefined') return rej(new Error('no idb'));
+    const rq = indexedDB.open(IDB_NAME, 1);
+    rq.onupgradeneeded = function () {
+      if (!rq.result.objectStoreNames.contains(IDB_STORE)) rq.result.createObjectStore(IDB_STORE);
+    };
+    rq.onsuccess = function () { __idb = rq.result; res(__idb); };
+    rq.onerror = function () { rej(rq.error); };
+  });
+}
+function idbSet(key, val) {
+  return openIDB().then(function (db) {
+    return new Promise(function (res, rej) {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(val, key);
+      tx.oncomplete = function () { res(); };
+      tx.onerror = function () { rej(tx.error); };
+    });
+  });
+}
+function idbGet(key) {
+  return openIDB().then(function (db) {
+    return new Promise(function (res, rej) {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const rq = tx.objectStore(IDB_STORE).get(key);
+      rq.onsuccess = function () { res(rq.result); };
+      rq.onerror = function () { rej(rq.error); };
+    });
+  });
+}
+// 把长 base64 摘掉，只留一个能塞进 localStorage 的骨架
+function slimForLocal(obj) {
+  const walk = function (v) {
+    if (typeof v === 'string') {
+      return (v.length > 600 && v.slice(0, 5) === 'data:') ? '' : v;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') {
+      const o = {};
+      for (const k in v) o[k] = walk(v[k]);
+      return o;
+    }
+    return v;
+  };
+  return walk(obj);
+}
 function flushSaveData() {
   if (__saveTimer) { clearTimeout(__saveTimer); __saveTimer = null; }
+  const raw = JSON.stringify(appData);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
+    localStorage.setItem(STORAGE_KEY, raw);
+    if (__idbMode) idbSet('data', raw).catch(function () {});
   } catch (e) {
     console.error('保存数据失败', e);
-    showToast('存不下了。头像换张小图试试');
+    // 装不下了：先写进 IndexedDB，再拿瘦身版占住 localStorage
+    idbSet('data', raw).then(function () {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(slimForLocal(appData)));
+        localStorage.setItem(IDB_FLAG, '1');
+        __idbMode = true;
+        showToast('已切换到大容量存储');
+      } catch (e2) {
+        showToast('存不下了。头像换张小图试试');
+      }
+    }).catch(function () {
+      showToast('存不下了。头像换张小图试试');
+    });
   }
+}
+// 启动后从 IndexedDB 补回图片
+function hydrateFromIDB() {
+  let flag = null;
+  try { flag = localStorage.getItem(IDB_FLAG); } catch (e) { return; }
+  if (flag !== '1') return;
+  __idbMode = true;
+  idbGet('data').then(function (raw) {
+    if (!raw) return;
+    let d = null;
+    try { d = JSON.parse(raw); } catch (e) { return; }
+    if (!d || typeof d !== 'object') return;
+    appData = d;
+    refreshAfterHydrate();
+  }).catch(function () {});
+}
+function refreshAfterHydrate() {
+  try { renderConversations(); } catch (e) {}
+  try { if (appData.currentChatId) renderChatMessages(); } catch (e) {}
+  try { if (window.currentPage === 'moments' && typeof renderMomentsFeed === 'function') renderMomentsFeed(); } catch (e) {}
+  try { if (typeof renderLetters === 'function') renderLetters(); } catch (e) {}
+  try { applyTheme(); } catch (e) {}
 }
 
 // 高频操作合并写，减少卡顿；关页前会自动落盘
@@ -536,8 +636,100 @@ function randomPick(arr) {
 }
 
 // ==================== 主题系统 ====================
+// ===== 自定义主色 & 气泡 CSS =====
+const CUSTOM_THEME_VARS = ['--primary', '--primary-light', '--primary-dark', '--primary-soft', '--bubble-mine', '--shadow-glow', '--glow-soft'];
+function hexToHsl(hex) {
+  const r = parseInt(hex.slice(1, 3), 16) / 255;
+  const g = parseInt(hex.slice(3, 5), 16) / 255;
+  const b = parseInt(hex.slice(5, 7), 16) / 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0;
+  const l = (max + min) / 2;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+    else if (max === g) h = (b - r) / d + 2;
+    else h = (r - g) / d + 4;
+    h *= 60;
+  }
+  return { h: h, s: s * 100, l: l * 100 };
+}
+function hslToHex(h, s, l) {
+  h = ((h % 360) + 360) % 360;
+  s = Math.max(0, Math.min(100, s)) / 100;
+  l = Math.max(0, Math.min(100, l)) / 100;
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  const m = l - c / 2;
+  let r = 0, g = 0, b = 0;
+  if (h < 60) { r = c; g = x; }
+  else if (h < 120) { r = x; g = c; }
+  else if (h < 180) { g = c; b = x; }
+  else if (h < 240) { g = x; b = c; }
+  else if (h < 300) { r = x; b = c; }
+  else { r = c; b = x; }
+  const f = v => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+  return '#' + f(r) + f(g) + f(b);
+}
+function rgbaOfHex(hex, a) {
+  return 'rgba(' + parseInt(hex.slice(1, 3), 16) + ',' + parseInt(hex.slice(3, 5), 16) + ',' + parseInt(hex.slice(5, 7), 16) + ',' + a + ')';
+}
+function applyCustomTheme() {
+  const root = document.documentElement;
+  CUSTOM_THEME_VARS.forEach(function (k) { root.style.removeProperty(k); });
+  const isDark = !!appData.settings.darkMode;
+  const raw = String((isDark ? appData.settings.customColorDark : appData.settings.customColorLight) || '').trim();
+  const elL = document.getElementById('customColorLight');
+  const elD = document.getElementById('customColorDark');
+  if (elL && /^#[0-9a-fA-F]{6}$/.test(appData.settings.customColorLight || '')) elL.value = appData.settings.customColorLight;
+  if (elD && /^#[0-9a-fA-F]{6}$/.test(appData.settings.customColorDark || '')) elD.value = appData.settings.customColorDark;
+  if (!/^#[0-9a-fA-F]{6}$/.test(raw)) return;
+  const c = hexToHsl(raw);
+  const pl = hslToHex(c.h, c.s - 4, c.l + 9);
+  const pd = hslToHex(c.h, c.s + 4, c.l - 11);
+  root.style.setProperty('--primary', raw);
+  root.style.setProperty('--primary-light', pl);
+  root.style.setProperty('--primary-dark', pd);
+  root.style.setProperty('--primary-soft', rgbaOfHex(raw, 0.14));
+  root.style.setProperty('--bubble-mine', 'linear-gradient(135deg, ' + pl + ' 0%, ' + raw + ' 100%)');
+  root.style.setProperty('--shadow-glow', '0 0 18px ' + rgbaOfHex(raw, 0.22));
+  root.style.setProperty('--glow-soft', '0 0 20px ' + rgbaOfHex(raw, 0.15));
+}
+function scopeBubbleCss(css) {
+  const cleaned = String(css || '').replace(/\/\*[\s\S]*?\*\//g, '');
+  let out = '';
+  cleaned.split('}').forEach(function (block) {
+    const idx = block.indexOf('{');
+    if (idx < 0) return;
+    const sel = block.slice(0, idx).trim();
+    const body = block.slice(idx + 1).trim();
+    if (!sel || !body) return;
+    const scoped = sel.split(',').map(function (one) {
+      one = one.trim();
+      if (!one) return '';
+      if (one.charAt(0) === '@') return '';
+      return '#chatMessages ' + one;
+    }).filter(Boolean);
+    if (!scoped.length) return;
+    out += scoped.join(', ') + ' {' + body + '}\n';
+  });
+  return out;
+}
+function applyCustomBubbleCss() {
+  let el = document.getElementById('visual-custom-bubble-css');
+  if (!el) {
+    el = document.createElement('style');
+    el.id = 'visual-custom-bubble-css';
+    (document.head || document.documentElement).appendChild(el);
+  }
+  const css = String(appData.settings.customBubbleCss || '');
+  el.textContent = css.trim() ? scopeBubbleCss(css) : '';
+}
 function applyTheme() {
   const root = document.documentElement;
+  applyCustomTheme();
+  applyCustomBubbleCss();
   // 添加过渡类实现平滑切换
   root.classList.add('theme-transition');
   if (appData.settings.darkMode) {
@@ -1487,6 +1679,210 @@ function initToggles() {
       scheduleAutoCall();
     }
   });
+
+  (function bindIncomingLetterUI() {
+    const tg = document.getElementById('incomingLetterToggle');
+    const mn = document.getElementById('incomingLetterMinH');
+    const mx = document.getElementById('incomingLetterMaxH');
+    const wl = document.getElementById('incomingLetterWhitelist');
+    if (tg) {
+      tg.classList.toggle('active', appData.settings.incomingLetterEnabled === true);
+      tg.addEventListener('click', function () {
+        appData.settings.incomingLetterEnabled = !(appData.settings.incomingLetterEnabled === true);
+        this.classList.toggle('active', appData.settings.incomingLetterEnabled);
+        saveData();
+        scheduleIncomingLetter();
+      });
+    }
+    if (mn && mx) {
+      mn.value = appData.settings.incomingLetterMinH || 2;
+      mx.value = appData.settings.incomingLetterMaxH || 72;
+      function commit() {
+        let a = Number(mn.value); if (!isFinite(a)) a = 2;
+        let b = Number(mx.value); if (!isFinite(b)) b = 72;
+        a = Math.max(1, Math.min(240, Math.round(a)));
+        b = Math.max(1, Math.min(240, Math.round(b)));
+        if (b < a) b = a;
+        appData.settings.incomingLetterMinH = a;
+        appData.settings.incomingLetterMaxH = b;
+        mn.value = a; mx.value = b;
+        saveData();
+        scheduleIncomingLetter();
+      }
+      mn.addEventListener('change', commit);
+      mx.addEventListener('change', commit);
+    }
+    if (wl) {
+      const cur = Array.isArray(appData.settings.incomingLetterWhitelist) ? appData.settings.incomingLetterWhitelist : [];
+      wl.innerHTML = '';
+      if (appData.contacts.length === 0) {
+        wl.innerHTML = '<span style="font-size:12px;color:var(--text-tertiary);">还没有联系人</span>';
+      }
+      appData.contacts.forEach(function (c) {
+        const btn = document.createElement('button');
+        btn.className = 'mm-chip' + (cur.indexOf(c.id) >= 0 ? ' active' : '');
+        btn.textContent = c.name || '未命名';
+        btn.addEventListener('click', function () {
+          btn.classList.toggle('active');
+          const picked = Array.prototype.map.call(wl.querySelectorAll('.mm-chip.active'), function (b) { return b.textContent; });
+          const ids = [];
+          appData.contacts.forEach(function (x) {
+            if (picked.indexOf(x.name || '未命名') >= 0) ids.push(x.id);
+          });
+          appData.settings.incomingLetterWhitelist = ids;
+          saveData();
+          scheduleIncomingLetter();
+        });
+        wl.appendChild(btn);
+      });
+    }
+  })();
+
+  (function bindMomentsCfgUI() {
+    const cfg = getMomentsCfg();
+    const raw = appData.settings || {};
+    const defaults = {
+      momentsCommentChance: 50, momentsLikeChance: 65, momentsReplyChance: 40, momentsInteractChance: 35,
+      momentsBrowseMinMin: 5, momentsBrowseMaxMin: 180,
+      momentsPostIntervalMin: 30, momentsPostIntervalMax: 1440,
+      momentsDailyMin: 1, momentsDailyMax: 3,
+      momentsWordMin: 2, momentsWordMax: 5
+    };
+    document.querySelectorAll('.mm-num').forEach(function (el) {
+      const key = el.dataset.mk;
+      const v = (typeof raw[key] === 'number') ? raw[key] : defaults[key];
+      el.value = v;
+      function commit() {
+        let n = Number(el.value);
+        if (!isFinite(n)) n = defaults[key];
+        n = Math.round(n);
+        const lo = Number(el.min) || 0;
+        const hi = Number(el.max) || 1440;
+        n = Math.max(lo, Math.min(hi, n));
+        appData.settings[key] = n;
+        el.value = n;
+        if (key === 'momentsBrowseMinMin' && appData.settings.momentsBrowseMaxMin < n) appData.settings.momentsBrowseMaxMin = n;
+        if (key === 'momentsPostIntervalMin' && appData.settings.momentsPostIntervalMax < n) appData.settings.momentsPostIntervalMax = n;
+        if (key === 'momentsDailyMin' && appData.settings.momentsDailyMax < n) appData.settings.momentsDailyMax = n;
+        if (key === 'momentsWordMin' && appData.settings.momentsWordMax < n) appData.settings.momentsWordMax = n;
+        saveData();
+        scheduleAiMomentsTimer();
+      }
+      el.addEventListener('change', commit);
+      el.addEventListener('blur', commit);
+    });
+    document.querySelectorAll('.mm-chips').forEach(function (box) {
+      const key = box.dataset.mk;
+      const cur = Array.isArray(raw[key]) && raw[key].length ? raw[key] : (key === 'momentsPostTypes' ? ['text', 'image', 'kaomoji', 'emoji', 'sticker'] : ['text', 'kaomoji', 'emoji', 'sticker']);
+      box.querySelectorAll('.mm-chip').forEach(function (btn) {
+        btn.classList.toggle('active', cur.indexOf(btn.dataset.val) >= 0);
+        btn.addEventListener('click', function () {
+          const on = box.querySelectorAll('.mm-chip.active');
+          if (this.classList.contains('active') && on.length <= 1) {
+            showToast('至少留一种');
+            return;
+          }
+          this.classList.toggle('active');
+          const picked = Array.prototype.map.call(box.querySelectorAll('.mm-chip.active'), function (b) { return b.dataset.val; });
+          appData.settings[key] = picked;
+          saveData();
+          scheduleAiMomentsTimer();
+        });
+      });
+    });
+    const mmT = document.getElementById('mmAutoPost');
+    if (mmT) {
+      mmT.classList.toggle('active', appData.settings.momentsAutoPost !== false);
+      mmT.addEventListener('click', function () {
+        appData.settings.momentsAutoPost = !(appData.settings.momentsAutoPost !== false);
+        this.classList.toggle('active', appData.settings.momentsAutoPost);
+        saveData();
+        scheduleAiMomentsTimer();
+      });
+    }
+  })();
+
+  (function bindCustomThemeUI() {
+    const elL = document.getElementById('customColorLight');
+    const elD = document.getElementById('customColorDark');
+    const elR = document.getElementById('customColorReset');
+    const ta = document.getElementById('customBubbleCss');
+    const ap = document.getElementById('customBubbleCssApply');
+    const cl = document.getElementById('customBubbleCssClear');
+    if (ta) ta.value = appData.settings.customBubbleCss || '';
+    if (elL) {
+      elL.addEventListener('input', function () {
+        appData.settings.customColorLight = this.value;
+        applyCustomTheme();
+      });
+      elL.addEventListener('change', function () { saveData(); });
+    }
+    if (elD) {
+      elD.addEventListener('input', function () {
+        appData.settings.customColorDark = this.value;
+        applyCustomTheme();
+      });
+      elD.addEventListener('change', function () { saveData(); });
+    }
+    if (elR) {
+      elR.addEventListener('click', function () {
+        appData.settings.customColorLight = '';
+        appData.settings.customColorDark = '';
+        if (elL) elL.value = '#89b8e8';
+        if (elD) elD.value = '#7eb8da';
+        applyCustomTheme();
+        saveData();
+        showToast('已还原默认主色');
+      });
+    }
+    if (ap && ta) {
+      ap.addEventListener('click', function () {
+        appData.settings.customBubbleCss = ta.value || '';
+        applyCustomBubbleCss();
+        saveData();
+        showToast('气泡样式已应用');
+      });
+    }
+    if (cl && ta) {
+      cl.addEventListener('click', function () {
+        ta.value = '';
+        appData.settings.customBubbleCss = '';
+        applyCustomBubbleCss();
+        saveData();
+        showToast('已清空气泡样式');
+      });
+    }
+  })();
+
+  (function bindAutoCallCfg() {
+    const elC = document.getElementById('autoCallChance');
+    const elA = document.getElementById('autoCallMinMin');
+    const elB = document.getElementById('autoCallMaxMin');
+    if (!elC || !elA || !elB) return;
+    const cfg = getAutoCallCfg();
+    elC.value = cfg.chance;
+    elA.value = cfg.minMin;
+    elB.value = cfg.maxMin;
+    function commit() {
+      let c = Number(elC.value); if (!isFinite(c)) c = 40;
+      c = Math.max(0, Math.min(100, Math.round(c)));
+      let a = Number(elA.value); if (!isFinite(a)) a = 120;
+      let b = Number(elB.value); if (!isFinite(b)) b = 720;
+      a = Math.max(1, Math.min(1440, Math.round(a)));
+      b = Math.max(1, Math.min(1440, Math.round(b)));
+      if (b < a) b = a;
+      appData.settings.autoCallChance = c;
+      appData.settings.autoCallMinMin = a;
+      appData.settings.autoCallMaxMin = b;
+      elC.value = c; elA.value = a; elB.value = b;
+      saveData();
+      if (appData.settings.autoCall) scheduleAutoCall();
+    }
+    [elC, elA, elB].forEach(function (el) {
+      el.addEventListener('change', commit);
+      el.addEventListener('blur', commit);
+    });
+  })();
   
   document.getElementById('desktopNotifyToggle').addEventListener('click', function () {
     const el = this;
@@ -2528,9 +2924,22 @@ function scrollToBottomSmooth() {
 }
 
 // 点击消息展开的时间戳状态（按会话隔离，不持久化）
+let msgRenderOffset = 0;
+let msgRenderKey = '';
+let skipAutoScrollOnce = false;
 let expandedTimeIdxs = new Set();
 let expandedTimeKey = '';
 
+function loadMoreMessages() {
+  const c = document.getElementById('chatMessages');
+  const before = c ? c.scrollHeight : 0;
+  const beforeTop = c ? c.scrollTop : 0;
+  msgRenderOffset += 80;
+  skipAutoScrollOnce = true;
+  renderChatMessages();
+  const c2 = document.getElementById('chatMessages');
+  if (c2) c2.scrollTop = c2.scrollHeight - before + beforeTop - 40;
+}
 function renderChatMessages() {
   const container = document.getElementById('chatMessages');
   
@@ -2551,6 +2960,7 @@ function renderChatMessages() {
 
   // 点击显示的时间戳按会话隔离，切换会话后清空展开状态
   if (expandedTimeKey !== key) { expandedTimeIdxs.clear(); expandedTimeKey = key; }
+  if (msgRenderKey !== key) { msgRenderKey = key; msgRenderOffset = 0; }
 
   if (messages.length === 0) {
     container.innerHTML = `
@@ -2569,7 +2979,9 @@ function renderChatMessages() {
   const wasAway = userScrolledUp && isScrolledAway(container);
   const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
   
-  let html = '';
+  const startIdx = Math.max(0, messages.length - 80 - msgRenderOffset);
+  const visibleMessages = messages.slice(startIdx);
+  let html = startIdx > 0 ? `<div class="load-earlier" onclick="loadMoreMessages()"><i class="fas fa-chevron-up"></i> 查看更早的消息（还有 ${startIdx} 条）</div>` : '';
   let lastTime = 0;
   let lastDateStr = '';
   let lastMyMsgIdx = -1;
@@ -2580,7 +2992,8 @@ function renderChatMessages() {
     if (messages[i].sender === selfId) { lastMyMsgIdx = i; break; }
   }
   
-  messages.forEach((msg, idx) => {
+  visibleMessages.forEach((msg, k) => {
+    const idx = startIdx + k;
     // 跨天时显示日期分割线（今天/昨天/星期/具体日期）
     const msgDate = new Date(msg.time);
     const dateStr = msgDate.getFullYear() + '-' + (msgDate.getMonth() + 1) + '-' + msgDate.getDate();
@@ -2665,9 +3078,10 @@ function renderChatMessages() {
     }
     // 补偿新增内容高度，让视口停留在原本浏览的位置
     container.scrollTop = container.scrollHeight - container.clientHeight - distanceFromBottom;
-  } else {
+  } else if (!skipAutoScrollOnce) {
     container.scrollTop = container.scrollHeight;
   }
+  skipAutoScrollOnce = false;
   updateScrollBottomUI(container);
   // v33：切回会话时把“正在输入”补回去
   const _tk = (appData.currentChatType === 'group' ? 'group_' : 'contact_') + appData.currentChatId;
@@ -2695,6 +3109,90 @@ function renderQuoteBubble(quote, level = 0) {
   return `<div class="bubble quote">${nested}<strong>${sender}：</strong>${content}</div>`;
 }
 
+// ===== 31 联系人主动来信 =====
+const incomingLetterTimer = { id: null };
+function getIncomingLetterCfg() {
+  const st = appData.settings || {};
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  let mn = Number(st.incomingLetterMinH);
+  if (!isFinite(mn)) mn = 2;
+  let mx = Number(st.incomingLetterMaxH);
+  if (!isFinite(mx)) mx = 72;
+  mn = clamp(Math.round(mn), 1, 240);
+  mx = clamp(Math.round(mx), 1, 240);
+  if (mx < mn) { const t = mn; mn = mx; mx = t; }
+  let wl = Array.isArray(st.incomingLetterWhitelist) ? st.incomingLetterWhitelist.filter(Boolean) : [];
+  return { on: st.incomingLetterEnabled === true, minH: mn, maxH: mx, whitelist: wl };
+}
+function scheduleIncomingLetter() {
+  if (incomingLetterTimer.id) { clearTimeout(incomingLetterTimer.id); incomingLetterTimer.id = null; }
+  const cfg = getIncomingLetterCfg();
+  if (!cfg.on) return;
+  if (appData.contacts.length === 0) return;
+  const hours = randomInt(cfg.minH, Math.max(cfg.minH, cfg.maxH));
+  const delay = Math.min(hours * 3600000, 2147483000);
+  incomingLetterTimer.id = setTimeout(function () {
+    incomingLetterTimer.id = null;
+    deliverIncomingLetter();
+    scheduleIncomingLetter();
+  }, delay);
+}
+function deliverIncomingLetter() {
+  const cfg = getIncomingLetterCfg();
+  if (!cfg.on) return;
+  let pool = appData.contacts.slice();
+  if (cfg.whitelist.length > 0) {
+    const set = {};
+    cfg.whitelist.forEach(id => { set[id] = true; });
+    const filtered = pool.filter(c => set[c.id]);
+    if (filtered.length > 0) pool = filtered;
+  }
+  if (pool.length === 0) return;
+  const c = pool[Math.floor(Math.random() * pool.length)];
+  const words = pickContactWords(c);
+  let text = '';
+  if (words.length > 0) {
+    const n = randomInt(1, 3);
+    const parts = [];
+    for (let i = 0; i < n; i++) parts.push(randomPick(words));
+    text = parts.join('，') + randomPick(['。', '~', '～', '！']);
+  } else {
+    text = randomPick(['在吗', '想你了', '今天过得怎么样', '有空吗', '刚想起你', '早点睡']);
+  }
+  addMessageTo('contact', c.id, {
+    type: 'text',
+    content: text,
+    sender: c.id,
+    time: Date.now()
+  });
+}
+function openCallDetail(idx) {
+  const key = (appData.currentChatType === 'group' ? 'group_' : 'contact_') + appData.currentChatId;
+  const arr = appData.chatRecords[key] || [];
+  const m = arr[idx];
+  if (!m || m.type !== 'call') return;
+  const mine = isSelf(m.sender);
+  const peerName = appData.currentChatType === 'group'
+    ? '群成员'
+    : ((appData.contacts.find(c => c.id === appData.currentChatId) || {}).name || '对方');
+  const direction = m.callDirection === 'incoming'
+    ? (mine ? '对方呼入' : '呼入')
+    : (m.callDirection === 'outgoing' ? (mine ? '我呼出' : '呼出') : (mine ? '我发起' : '对方发起'));
+  const durText = m.durationText || (typeof m.duration === 'number' ? formatCallDuration(m.duration) : '—');
+  const hangText = m.missed ? '未接' : (m.hangupBy === 'self' ? '你挂的' : (m.hangupBy === 'peer' ? peerName + ' 挂的' : (m.hangupBy === 'timeout' ? '超时结束' : '—')));
+  const rows = [
+    ['对方', escapeHtml(peerName)],
+    ['方向', escapeHtml(direction)],
+    ['时长', escapeHtml(String(durText))],
+    ['结束', escapeHtml(hangText)],
+    ['时间', escapeHtml(formatFullTime(m.time))]
+  ];
+  const body = '<div class="call-detail">' + rows.map(r => `
+    <div class="call-detail-row"><span class="cd-label">${r[0]}</span><span class="cd-value">${r[1]}</span></div>
+  `).join('') + '</div>';
+  const footer = `<button class="btn btn-secondary" onclick="closeModal(currentModalId)">关闭</button>`;
+  window.currentModalId = showModal('通话详情', body, footer);
+}
 function renderMessageBubble(msg, idx) {
   if (msg.type === 'image') {
     // 判断是否为表情包（来自表情库的base64小图，无气泡背景直接展示）
@@ -2702,7 +3200,7 @@ function renderMessageBubble(msg, idx) {
     return `<div class="bubble ${isEmoji ? 'emoji-msg' : ''}"><img class="msg-img" src="${msg.content}" onclick="openImagePreview('${msg.content}')" alt="表情包"></div>`;
   }
   if (msg.type === 'call') {
-    return `<div class="bubble"><i class="fas fa-phone"></i> ${msg.content}</div>`;
+    return `<div class="bubble call-bubble${msg.missed ? ' missed' : ''}" onclick="openCallDetail(${idx})"><i class="fas fa-phone"></i> ${escapeHtml(msg.content)}</div>`;
   }
   if (msg.type === 'survey') {
     return renderSurveyBubble(msg);
@@ -4476,17 +4974,19 @@ function initMusicFab() {
     fab.style.bottom = 'auto';
   }
   let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false, moved = false, lastDragEnd = 0;
+  // v33.4：手指点一下会抖，阈值放宽；拖完不留后遗症
+  let justDragged = false;
   fab.addEventListener('pointerdown', function (e) {
     if (e.button && e.button !== 0) return;
     const r = fab.getBoundingClientRect();
     sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
-    moved = false; dragging = true;
+    moved = false; dragging = true; justDragged = false;
     try { fab.setPointerCapture(e.pointerId); } catch (err) {}
   });
   fab.addEventListener('pointermove', function (e) {
     if (!dragging) return;
     const dx = e.clientX - sx, dy = e.clientY - sy;
-    if (!moved && Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    if (!moved && Math.abs(dx) < 14 && Math.abs(dy) < 14) return;
     moved = true;
     const w = fab.offsetWidth || 38, h = fab.offsetHeight || 38;
     const x = Math.max(4, Math.min(window.innerWidth - w - 4, ox + dx));
@@ -4503,12 +5003,15 @@ function initMusicFab() {
       const r = fab.getBoundingClientRect();
       appData.settings.musicFabPos = { x: Math.round(r.left), y: Math.round(r.top) };
       lastDragEnd = Date.now();
+      justDragged = true;
+      setTimeout(function () { justDragged = false; }, 350);
       saveData();
     }
   });
   fab.addEventListener('pointercancel', function () { dragging = false; });
   fab.addEventListener('click', function (e) {
-    if (Date.now() - lastDragEnd < 400) { e.preventDefault(); e.stopPropagation(); return; }
+    // 刚拖过就吞掉这次点击；平时点一下立刻开
+    if (justDragged) { justDragged = false; e.preventDefault(); e.stopPropagation(); return; }
     toggleMusicPanel();
   });
 }
@@ -4582,14 +5085,82 @@ function updateFullscreenState() {
 document.addEventListener('fullscreenchange', updateFullscreenState);
 document.addEventListener('webkitfullscreenchange', updateFullscreenState);
 
+function bytesOf(v) {
+  try { return new Blob([typeof v === 'string' ? v : JSON.stringify(v)]).size; } catch (e) { return 0; }
+}
+function computeStorageParts() {
+  const isImg = v => (typeof v === 'string' && v.slice(0, 5) === 'data:');
+  let imgBytes = 0, chatImgBytes = 0, momentImgBytes = 0;
+  const add = v => { if (isImg(v)) imgBytes += bytesOf(v); };
+  (appData.contacts || []).forEach(c => add(c.avatar));
+  (appData.groups || []).forEach(g => add(g.avatar));
+  if (appData.myProfile) add(appData.myProfile.avatar);
+
+  const records = appData.chatRecords || {};
+  Object.keys(records).forEach(k => {
+    (records[k] || []).forEach(m => {
+      if (m.content && isImg(m.content)) { chatImgBytes += bytesOf(m.content); imgBytes += bytesOf(m.content); }
+    });
+  });
+  (appData.moments || []).forEach(m => {
+    (m.images || []).forEach(img => {
+      if (isImg(img)) { momentImgBytes += bytesOf(img); imgBytes += bytesOf(img); }
+    });
+    (m.comments || []).forEach(cm => {
+      if (cm.img && isImg(cm.img)) { momentImgBytes += bytesOf(cm.img); imgBytes += bytesOf(cm.img); }
+    });
+  });
+
+  const chatTotal = bytesOf(records);
+  const momentTotal = bytesOf(appData.moments || []);
+  const wordTotal = bytesOf({ a: appData.wordGroups || [], b: appData.wordLibrary || [], c: appData.wordRules || [] });
+  const letterTotal = bytesOf(appData.letters || []);
+  const allTotal = bytesOf(appData);
+  const rest = Math.max(0, allTotal - chatTotal - momentTotal - wordTotal - letterTotal);
+  return [
+    { label: '图片（头像 / 聊天图 / 朋友圈图）', bytes: imgBytes },
+    { label: '聊天记录', bytes: Math.max(0, chatTotal - chatImgBytes) },
+    { label: '朋友圈', bytes: Math.max(0, momentTotal - momentImgBytes) },
+    { label: '词条库', bytes: wordTotal },
+    { label: '信件', bytes: letterTotal },
+    { label: '其他（设置 / 问卷 / 规则）', bytes: rest },
+    { label: '合计', bytes: allTotal, strong: true }
+  ];
+}
+function fmtBytes(n) {
+  if (!n) return '0 KB';
+  if (n > 1024 * 1024) return (n / 1024 / 1024).toFixed(2) + ' MB';
+  return (n / 1024).toFixed(1) + ' KB';
+}
 function showStorageUsage() {
   flushSaveData();
-  const raw = localStorage.getItem(STORAGE_KEY) || '';
-  const kb = new Blob([raw]).size / 1024;
-  const text = kb > 1024 ? (kb / 1024).toFixed(2) + ' MB' : kb.toFixed(1) + ' KB';
-  showToast('本地占用约 ' + text);
+  const parts = computeStorageParts();
+  const total = parts[parts.length - 1].bytes || 1;
+  const body = `
+    <div class="storage-list">
+      ${parts.map(p => `
+        <div class="storage-row${p.strong ? ' strong' : ''}">
+          <span class="st-label">${p.label}</span>
+          <span class="st-value">${fmtBytes(p.bytes)}</span>
+        </div>
+        ${p.strong ? '' : `<div class="storage-bar"><i style="width:${Math.min(100, (p.bytes / total) * 100).toFixed(1)}%"></i></div>`}
+      `).join('')}
+    </div>
+    <div class="storage-quota" id="storageQuotaLine">容量：计算中…</div>
+  `;
+  window.currentModalId = showModal('存储占用', body, `<button class="btn btn-secondary" onclick="closeModal(currentModalId)">关闭</button>`);
+  if (navigator.storage && navigator.storage.estimate) {
+    navigator.storage.estimate().then(function (est) {
+      const line = document.getElementById('storageQuotaLine');
+      if (!line) return;
+      const used = est.usage || total;
+      const quota = est.quota || 0;
+      line.textContent = quota
+        ? '已用 ' + fmtBytes(used) + ' / 剩余 ' + fmtBytes(Math.max(0, quota - used)) + '（设备给的上限）'
+        : '已用 ' + fmtBytes(used);
+    }).catch(function () {});
+  }
 }
-
 // 【继续】按钮：对方立即主动发言（可连续点击）
 function triggerContinue() {
   if (!appData.currentChatId) {
@@ -4770,13 +5341,14 @@ function renderSurveyEditor() {
   }
   
   list.innerHTML = surveyEditorData.map((q, qi) => `
-    <div class="survey-editor-q">
+    <div class="survey-editor-q" data-qtype="${q.type || 'single'}">
       <div class="q-head">
         <span style="font-size:12px;color:var(--primary);font-weight:600;flex-shrink:0;">Q${qi + 1}</span>
         <input type="text" class="input" placeholder="输入问题" value="${escapeAttr(q.text || '')}" oninput="updateSurveyQText(${qi}, this.value)">
         <select class="q-type-sel" onchange="updateSurveyQType(${qi}, this.value)">
-          <option value="single" ${q.type !== 'multi' ? 'selected' : ''}>单选</option>
+          <option value="single" ${(!q.type || q.type === 'single') ? 'selected' : ''}>单选</option>
           <option value="multi" ${q.type === 'multi' ? 'selected' : ''}>多选</option>
+          <option value="text" ${q.type === 'text' ? 'selected' : ''}>填空</option>
         </select>
         <div class="opt-del" title="删除问题" onclick="delSurveyQuestion(${qi})"><i class="fas fa-trash"></i></div>
       </div>
@@ -4827,7 +5399,7 @@ function buildValidSurvey() {
       type: q.type || 'single',
       options: (q.options || []).map(o => o.trim()).filter(o => o)
     }))
-    .filter(q => q.text && q.options.length >= 2);
+    .filter(q => q.text && (q.type === 'text' || q.options.length >= 2));
   
   if (questions.length === 0) {
     showToast('请至少完善一道题（题目+两个选项）');
@@ -4852,6 +5424,17 @@ function schedulePeerSurveyAnswer(targetType, targetId, myMsg, survey) {
     if (myMsg.survey && myMsg.survey.expired) return; // 已超时限，不再作答
     const senderInfo = getReplySender(targetType, targetId);
     const answers = survey.questions.map(q => {
+      if (q.type === 'text') {
+        const cc = targetType === 'group' ? null : appData.contacts.find(x => x.id === targetId);
+        const ww = cc ? pickContactWords(cc) : [];
+        if (ww.length) {
+          const n = randomInt(1, 3);
+          const ps = [];
+          for (let i = 0; i < n; i++) ps.push(randomPick(ww));
+          return [ps.join('，')];
+        }
+        return [randomPick(['好', '还行', '不知道', '看情况', '都可以'])];
+      }
       if (q.type === 'multi') {
         const shuffled = [...q.options].sort(() => Math.random() - 0.5);
         const n = randomInt(1, Math.min(2, q.options.length));
@@ -5161,7 +5744,10 @@ const SETTINGS_HUB_ITEMS = [
   { id: 'notesCollapsible', icon: 'fa-pen-to-square', title: '记事本&待办' },
   { id: 'favoritesCollapsible', icon: 'fa-star', title: '收藏夹' },
   { id: 'advToolsCollapsible', icon: 'fa-screwdriver-wrench', title: '高级工具' },
-  { id: 'backupCollapsible', icon: 'fa-database', title: '数据备份' }
+  { id: 'backupCollapsible', icon: 'fa-database', title: '数据备份' },
+  { action: 'surveyEditor', icon: 'fa-pen-to-square', title: '问卷编辑器' },
+  { action: 'mySurveyLib', icon: 'fa-folder-open', title: '我的问卷库' },
+  { action: 'quickSurvey', icon: 'fa-paper-plane', title: '发问卷给Ta' }
 ];
 
 function openChatSettingsHub() {
@@ -5172,7 +5758,7 @@ function openChatSettingsHub() {
           <i class="fas ${it.icon}"></i><span>${it.title}</span>
         </div>`).join('')}
     </div>
-    <div style="font-size:11px;color:var(--text-tertiary);margin-top:10px;text-align:center;">点击任意项跳转设置页对应面板</div>
+    <div style="font-size:11px;color:var(--text-tertiary);margin-top:10px;text-align:center;">点面板项跳设置页；问卷三项直接打开</div>
   `;
   window.currentModalId = showModal('设置中心', body);
   const grid = document.querySelector('.modal-overlay:last-child .settings-hub-grid');
@@ -5180,7 +5766,16 @@ function openChatSettingsHub() {
     grid.addEventListener('click', (e) => {
       const item = e.target.closest('[data-hub-idx]');
       if (!item) return;
-      jumpToSettingsPanel(SETTINGS_HUB_ITEMS[+item.dataset.hubIdx].id);
+      const it = SETTINGS_HUB_ITEMS[+item.dataset.hubIdx];
+      if (!it) return;
+      if (it.action) {
+        closeModal(currentModalId);
+        if (it.action === 'surveyEditor') { openMySurveyLibEditor(null); return; }
+        if (it.action === 'mySurveyLib') { openMySurveyPicker(); return; }
+        if (it.action === 'quickSurvey') { openSurveyQuickMenu(); return; }
+        return;
+      }
+      jumpToSettingsPanel(it.id);
     });
   }
 }
@@ -5275,13 +5870,14 @@ function renderMySurveyLibEditor() {
   }
   
   list.innerHTML = mySurveyLibEditData.map((q, qi) => `
-    <div class="survey-editor-q">
+    <div class="survey-editor-q" data-qtype="${q.type || 'single'}">
       <div class="q-head">
         <span style="font-size:12px;color:var(--primary);font-weight:600;flex-shrink:0;">Q${qi + 1}</span>
         <input type="text" class="input" placeholder="输入问题" value="${escapeAttr(q.text || '')}" oninput="updMySurveyLibQText(${qi}, this.value)">
         <select class="q-type-sel" onchange="updMySurveyLibQType(${qi}, this.value)">
-          <option value="single" ${q.type !== 'multi' ? 'selected' : ''}>单选</option>
+          <option value="single" ${(!q.type || q.type === 'single') ? 'selected' : ''}>单选</option>
           <option value="multi" ${q.type === 'multi' ? 'selected' : ''}>多选</option>
+          <option value="text" ${q.type === 'text' ? 'selected' : ''}>填空</option>
         </select>
         <div class="opt-del" title="删除问题" onclick="delMySurveyLibQ(${qi})"><i class="fas fa-trash"></i></div>
       </div>
@@ -5313,7 +5909,7 @@ function saveMySurveyLibItem() {
       type: q.type || 'single',
       options: (q.options || []).map(o => o.trim()).filter(o => o)
     }))
-    .filter(q => q.text && q.options.length >= 2);
+    .filter(q => q.text && (q.type === 'text' || q.options.length >= 2));
   
   if (questions.length === 0) {
     showToast('请至少完善一道题（题目+两个选项）');
@@ -5413,13 +6009,14 @@ function renderSurveyLibEditor() {
   }
   
   list.innerHTML = surveyLibEditData.map((q, qi) => `
-    <div class="survey-editor-q">
+    <div class="survey-editor-q" data-qtype="${q.type || 'single'}">
       <div class="q-head">
         <span style="font-size:12px;color:var(--primary);font-weight:600;flex-shrink:0;">Q${qi + 1}</span>
         <input type="text" class="input" placeholder="输入问题" value="${escapeAttr(q.text || '')}" oninput="updSurveyLibQText(${qi}, this.value)">
         <select class="q-type-sel" onchange="updSurveyLibQType(${qi}, this.value)">
-          <option value="single" ${q.type !== 'multi' ? 'selected' : ''}>单选</option>
+          <option value="single" ${(!q.type || q.type === 'single') ? 'selected' : ''}>单选</option>
           <option value="multi" ${q.type === 'multi' ? 'selected' : ''}>多选</option>
+          <option value="text" ${q.type === 'text' ? 'selected' : ''}>填空</option>
         </select>
         <div class="opt-del" title="删除问题" onclick="delSurveyLibQ(${qi})"><i class="fas fa-trash"></i></div>
       </div>
@@ -5451,7 +6048,7 @@ function saveSurveyLibItem() {
       type: q.type || 'single',
       options: (q.options || []).map(o => o.trim()).filter(o => o)
     }))
-    .filter(q => q.text && q.options.length >= 2);
+    .filter(q => q.text && (q.type === 'text' || q.options.length >= 2));
   
   if (questions.length === 0) {
     showToast('请至少完善一道题（题目+两个选项）');
@@ -5699,8 +6296,10 @@ function openSurveyAnswerModal(msgIndex) {
     </div>
     ${s.questions.map((q, qi) => `
       <div class="survey-answer-q">
-        <div class="q-title">${qi + 1}. ${escapeHtml(q.text)}<span class="q-type-tag">${q.type === 'multi' ? '多选' : '单选'}</span></div>
-        ${q.options.map((opt, oi) => `
+        <div class="q-title">${qi + 1}. ${escapeHtml(q.text)}<span class="q-type-tag">${q.type === 'multi' ? '多选' : (q.type === 'text' ? '填空' : '单选')}</span></div>
+        ${q.type === 'text'
+          ? `<textarea class="input survey-text-answer" name="survey_q_${qi}" rows="2" placeholder="填写你的答案"></textarea>`
+          : q.options.map((opt, oi) => `
           <label class="survey-answer-opt">
             <input type="${q.type === 'multi' ? 'checkbox' : 'radio'}" name="survey_q_${qi}" value="${escapeAttr(opt)}">
             <span>${escapeHtml(opt)}</span>
@@ -5727,14 +6326,18 @@ function submitSurveyAnswer(msgIndex) {
   
   // 收集答案
   const answers = msg.survey.questions.map((q, qi) => {
-    const selected = Array.from(document.querySelectorAll(`input[name="survey_q_${qi}"]:checked`)).map(el => el.value);
-    return selected;
+    if (q.type === 'text') {
+      const box = document.querySelector(`[name="survey_q_${qi}"]`);
+      const v = box ? String(box.value || '').trim() : '';
+      return v ? [v] : [];
+    }
+    return Array.from(document.querySelectorAll(`input[name="survey_q_${qi}"]:checked`)).map(el => el.value);
   });
   
   // 校验单选题必答
   for (let i = 0; i < answers.length; i++) {
     if (msg.survey.questions[i].type !== 'multi' && answers[i].length === 0) {
-      showToast(`第 ${i + 1} 题为单选题，请选择答案`);
+      showToast(`第 ${i + 1} 题还没答`);
       return;
     }
   }
@@ -7535,10 +8138,6 @@ function clearOtherEmojis() {
 }
 
 // ==================== 数据备份 ====================
-function exportAllData() {
-  downloadJSON(appData, 'Vislta备份_' + new Date().toISOString().slice(0,10) + '.json');
-  showToast('已导出全部数据');
-}
 
 function importAllData(event) {
   const file = event.target.files[0];
@@ -8022,23 +8621,42 @@ document.getElementById('chatCallBtn').addEventListener('click', startCall);
 // ==================== 自动来电 ====================
 let autoCallTimer = null;
 
+function getAutoCallCfg() {
+  const st = appData.settings || {};
+  let chance = Number(st.autoCallChance);
+  if (!isFinite(chance)) chance = 40;
+  chance = Math.max(0, Math.min(100, chance));
+  let mn = Number(st.autoCallMinMin);
+  if (!isFinite(mn)) mn = 120;
+  let mx = Number(st.autoCallMaxMin);
+  if (!isFinite(mx)) mx = 720;
+  mn = Math.max(1, Math.min(1440, mn));
+  mx = Math.max(1, Math.min(1440, mx));
+  if (mx < mn) { const t = mn; mn = mx; mx = t; }
+  return { chance: chance, minMin: mn, maxMin: mx };
+}
 function scheduleAutoCall() {
   if (!appData.settings.autoCall || appData.contacts.length === 0) return;
-  
   if (autoCallTimer) clearTimeout(autoCallTimer);
-  
-  const delay = randomInt(60, 300) * 1000; // 1-5分钟后
-  
+
+  const cfg = getAutoCallCfg();
+  const lo = Math.round(cfg.minMin * 60);
+  const hi = Math.round(cfg.maxMin * 60);
+  const delay = randomInt(lo, Math.max(lo, hi)) * 1000;
+
   autoCallTimer = setTimeout(() => {
     if (!appData.settings.autoCall) return;
     if (isDNDTime()) {
       scheduleAutoCall();
       return;
     }
+    if (Math.random() * 100 > cfg.chance) {
+      scheduleAutoCall();
+      return;
+    }
     triggerIncomingCall();
   }, delay);
 }
-
 function isDNDTime() {
   if (!appData.settings.dndEnabled) return false;
   
@@ -9461,7 +10079,7 @@ function renderMomentComment(m, cm) {
   return `
     <div class="mc-row">
       <span class="mc-name" onclick="openMomentCommentInput('${m.id}','${cm.id}')">${escapeHtml(name)}</span>
-      ${replyTag}：${escapeHtml(cm.text)}
+      ${replyTag}：${cm.img ? `<img class="mc-img" src="${cm.img}" onclick="openImagePreview('${cm.img}')">` : escapeHtml(cm.text)}
       ${isMine ? `<span class="mc-del" onclick="deleteMomentComment('${m.id}','${cm.id}')">删除</span>` : ''}
     </div>
   `;
@@ -9811,50 +10429,122 @@ function clearMomentsUnread() {
 // ---------- AI 朋友圈行为 ----------
 // AI 定时发布 + 浏览我方动态
 function scheduleAiMomentsTimer() {
-  if (managedTimers.aiMoments) clearInterval(managedTimers.aiMoments);
+  if (managedTimers.aiMoments) { clearTimeout(managedTimers.aiMoments); managedTimers.aiMoments = null; }
   if (!appData.settings.autoMoments) return;
-  const intervalMin = Math.max(1, appData.settings.autoMomentsInterval || 30);
-  managedTimers.aiMoments = setInterval(aiMomentsTick, intervalMin * 60 * 1000);
+  if (!getMomentsCfg().autoPost) return;
+  const loop = function () {
+    managedTimers.aiMoments = setTimeout(function () {
+      if (!appData.settings.autoMoments || !getMomentsCfg().autoPost) return;
+      aiMomentsTick();
+      loop();
+    }, nextAiMomentDelay());
+  };
+  loop();
 }
-
-function aiMomentsTick() {
-  if (Math.random() < 0.5 && appData.contacts.length > 0) {
-    aiPostMoment();
-  } else {
-    aiBrowseMyMoments();
+function nextAiMomentDelay() {
+  const cfg = getMomentsCfg();
+  const now = new Date();
+  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const posted = appData.moments.filter(m => !isSelf(m.authorId) && m.time >= dayStart).length;
+  const dayEnd = dayStart + 86400000;
+  if (posted >= cfg.dailyMax) {
+    return Math.max(60000, dayEnd + 20 * 60000 - Date.now());
   }
+  const ms = randomInt(cfg.postIntervalMin, cfg.postIntervalMax) * 60000;
+  return Math.max(60000, Math.min(ms, dayEnd - Date.now() - 60000));
 }
-
-// AI 发布朋友圈（内容优先取其独立词库）
+function aiMomentsTick() {
+  if (Math.random() < 0.4) {
+    aiBrowseMyMoments(randomInt(1, 2));
+    return;
+  }
+  aiPostMoment();
+}
+// 生成一张朋友圈配图（本地 canvas，体积小）
+function makeMomentGenImage(kind) {
+  const size = 240;
+  const cv = document.createElement('canvas');
+  cv.width = size; cv.height = size;
+  const ctx = cv.getContext('2d');
+  if (!ctx) return '';
+  if (kind === 'sticker') {
+    const bg = randomPick(['#FFF6E5', '#EAF4FF', '#F3EFFF', '#EAFBF2', '#FFF0F3']);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, size, size);
+    ctx.font = '120px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(randomPick(MOMENT_EMOJI), size / 2, size / 2 + 4);
+  } else {
+    const h = randomInt(0, 359);
+    const g = ctx.createLinearGradient(0, 0, size, size);
+    g.addColorStop(0, 'hsl(' + h + ',60%,82%)');
+    g.addColorStop(1, 'hsl(' + ((h + 40) % 360) + ',56%,66%)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = '#ffffff';
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.arc(randomInt(10, size - 10), randomInt(10, size - 10), randomInt(12, 46), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+  return cv.toDataURL('image/jpeg', 0.6);
+}
+// AI 发布朋友圈（文字 / 图片 / 颜文字 / emoji / 表情包）
 function aiPostMoment() {
+  const cfg = getMomentsCfg();
+  if (!cfg.autoPost) return;
+  if (appData.contacts.length === 0) return;
   const c = appData.contacts[Math.floor(Math.random() * appData.contacts.length)];
   if (!c) return;
-  const groups = getWordGroupsForKey('contact', c.id);
-  const words = [];
-  groups.forEach(g => pushGroupWords(g, words));
 
-  let text;
-  if (words.length > 0) {
-    const cnt = randomInt(2, 4);
+  const words = pickContactWords(c);
+  const wordCount = function () {
+    return randomInt(cfg.wordMin, Math.max(cfg.wordMin, cfg.wordMax));
+  };
+  const makeText = function () {
+    if (words.length === 0) {
+      return randomPick(['今天天气真好', '又是元气满满的一天', '随便走走', '生活需要仪式感', '记录一下今天', '分享好心情', '晚安世界', '忙碌的一周终于结束了']);
+    }
+    const n = wordCount();
     const parts = [];
-    for (let i = 0; i < cnt; i++) parts.push(randomPick(words));
-    text = parts.join('，') + randomPick(['！', '。', '~', '～']);
+    for (let i = 0; i < n; i++) parts.push(randomPick(words));
+    return parts.join('，') + randomPick(['！', '。', '~', '～']);
+  };
+
+  const types = cfg.postTypes && cfg.postTypes.length ? cfg.postTypes : ['text'];
+  const type = types[Math.floor(Math.random() * types.length)];
+  let text = '';
+  let images = [];
+  if (type === 'kaomoji') {
+    text = randomPick(MOMENT_KAOMOJI);
+  } else if (type === 'emoji') {
+    const n = randomInt(1, 3);
+    for (let i = 0; i < n; i++) text += randomPick(MOMENT_EMOJI);
+  } else if (type === 'image') {
+    text = Math.random() < 0.6 ? makeText() : '';
+    const img = makeMomentGenImage('image');
+    if (img) images = [img];
+  } else if (type === 'sticker') {
+    const img = makeMomentGenImage('sticker');
+    if (img) images = [img];
   } else {
-    text = randomPick(['今天天气真好', '又是元气满满的一天', '随便走走', '生活需要仪式感', '记录一下今天', '分享好心情', '晚安世界', '忙碌的一周终于结束了']);
+    text = makeText();
   }
 
   appData.moments.unshift({
     id: 'mom_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
     authorId: c.id, authorName: c.name, authorAvatar: c.avatar,
-    text, images: [], visibility: 'public', visibleIds: [],
+    text, images, visibility: 'public', visibleIds: [],
     time: Date.now(), likes: [], comments: [], viewers: []
   });
   saveData();
-  // AI 发动态 → 小红点
   bumpMomentsUnread(1);
   if (window.currentPage === 'moments') renderMomentsFeed();
 }
-
 // ===== v33：朋友圈互动参数（没设过就用默认值）=====
 function getMomentsCfg() {
   const st = appData.settings || {};
@@ -9906,6 +10596,7 @@ function genMomentCommentText(c) {
   const type = cfg.commentTypes[Math.floor(Math.random() * cfg.commentTypes.length)];
   if (type === 'kaomoji') return MOMENT_KAOMOJI[Math.floor(Math.random() * MOMENT_KAOMOJI.length)];
   if (type === 'emoji') return MOMENT_EMOJI[Math.floor(Math.random() * MOMENT_EMOJI.length)];
+  if (type === 'sticker') return '[表情包]';
   const words = pickContactWords(c);
   if (!words.length) return null;
   const cnt = randomInt(1, 2);
@@ -11173,6 +11864,10 @@ function init() {
   if (appData.settings.autoCall) {
     scheduleAutoCall();
   }
+  // 启动联系人主动来信
+  scheduleIncomingLetter();
+  // 从 IndexedDB 补回大图
+  hydrateFromIDB();
   
   // 后台保活
   keepAlive();

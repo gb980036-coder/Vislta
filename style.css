@@ -5871,3 +5871,181 @@ html, body {
 #app {
   background: var(--bg-chat, var(--bg-primary));
 }
+
+
+/* ===== v33.5 表情包尺寸：不再撑满半屏 ===== */
+:root { --sticker-size: 112px; }
+.bubble.emoji-msg .msg-img {
+  max-width: min(var(--sticker-size, 112px), 40vw);
+  max-height: min(var(--sticker-size, 112px), 40vw);
+  width: auto;
+  height: auto;
+  border-radius: 10px;
+  box-shadow: none;
+}
+.bubble.emoji-msg {
+  padding: 2px !important;
+}
+
+
+/* ===== v33.6 自动来电参数输入框 ===== */
+.setting-num-input {
+  width: 66px;
+  text-align: center;
+  padding: 6px 6px;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 16%, transparent);
+  border-radius: 10px;
+  outline: none;
+  -webkit-appearance: none;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+.setting-num-input::-webkit-outer-spin-button,
+.setting-num-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.setting-num-input:focus {
+  border-color: color-mix(in srgb, var(--primary-color, #7EB8DA) 70%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color, #7EB8DA) 15%, transparent);
+}
+
+
+/* ===== v33.7 自定义主色 & 气泡 CSS ===== */
+.custom-color-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.custom-color-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.custom-color-cell input[type="color"] {
+  width: 54px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 16%, transparent);
+  border-radius: 10px;
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  overflow: hidden;
+}
+.custom-color-cell input[type="color"]::-webkit-color-swatch-wrapper { padding: 2px; }
+.custom-color-cell input[type="color"]::-webkit-color-swatch { border: none; border-radius: 7px; }
+.custom-color-reset {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border: none;
+  border-radius: 10px;
+  padding: 7px 12px;
+}
+.custom-color-reset:active { transform: scale(.96); }
+.bubble-css-input {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 84px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--text-primary) 14%, transparent);
+  border-radius: 12px;
+  outline: none;
+}
+.bubble-css-input:focus {
+  border-color: color-mix(in srgb, var(--primary-color, #7EB8DA) 60%, transparent);
+}
+.bubble-css-actions { display: flex; gap: 8px; }
+.bubble-css-actions .btn { font-size: 12px; padding: 7px 14px; }
+
+
+/* ===== v33.8 朋友圈设置面板 ===== */
+.mm-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.mm-line .mm-gap { margin-left: 10px; }
+.mm-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.mm-chip {
+  padding: 6px 13px;
+  font-size: 12px;
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-primary) 6%, transparent);
+  border: 1px solid transparent;
+  transition: all .16s ease;
+}
+.mm-chip.active {
+  color: #fff;
+  background: var(--primary);
+  border-color: transparent;
+}
+.mm-chip:active { transform: scale(.96); }
+.mc-img {
+  display: inline-block;
+  max-width: 84px;
+  max-height: 84px;
+  border-radius: 8px;
+  vertical-align: middle;
+  margin: 2px 2px;
+}
+
+
+/* ===== v33.9 问卷填空题 ===== */
+.survey-editor-q[data-qtype="text"] .survey-opt-row,
+.survey-editor-q[data-qtype="text"] .survey-add-btn { display: none; }
+.survey-text-answer {
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-height: 46px;
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.q-type-tag {
+  margin-left: 6px;
+}
+
+
+/* ===== v34.2 分批渲染 & 通话详情 ===== */
+.load-earlier {
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 10px 0 12px;
+  opacity: .8;
+}
+.load-earlier i { margin-right: 4px; }
+.call-bubble { cursor: pointer; }
+.call-bubble i { margin-right: 4px; opacity: .75; }
+.call-bubble.missed { color: var(--danger); }
+.call-detail { display: flex; flex-direction: column; gap: 12px; padding: 4px 2px 8px; }
+.call-detail-row { display: flex; align-items: center; justify-content: space-between; font-size: 14px; }
+.cd-label { color: var(--text-secondary); font-size: 13px; }
+.cd-value { color: var(--text-primary); font-weight: 500; }
+
+
+/* ===== v34.4 存储占用 ===== */
+.storage-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.storage-row { display: flex; align-items: center; justify-content: space-between; font-size: 13px; color: var(--text-secondary); }
+.storage-row.strong { color: var(--text-primary); font-weight: 600; padding-top: 8px; border-top: 1px solid var(--border-color); }
+.st-value { font-variant-numeric: tabular-nums; }
+.storage-bar { height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--text-primary) 8%, transparent); overflow: hidden; }
+.storage-bar i { display: block; height: 100%; border-radius: 999px; background: var(--primary); opacity: .8; }
+.storage-quota { font-size: 12px; color: var(--text-tertiary); text-align: center; }
