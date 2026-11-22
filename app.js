@@ -82,6 +82,7 @@ const defaultAppData = {
     timedMsgEnabled: false,
     keywordRules: '',
     musicFabHidden: false,
+    musicSrcFixed: false,
     musicFabPos: null,
     letterDeliverDelay: 0,
     timedMsgInterval: 30,
@@ -309,6 +310,13 @@ function loadData() {
   if (!appData.surveyTemplates) appData.surveyTemplates = {};
   if (!appData.surveyLibrary) appData.surveyLibrary = {};
   if (!appData.mySurveyLibrary) appData.mySurveyLibrary = {};
+  // v34.1：换过音源，旧版本标记的“放不了”全部作废
+  if (!appData.settings.musicSrcFixed) {
+    (appData.musicLists || []).forEach(function (l) {
+      (l.songs || []).forEach(function (sg) { sg.bad = false; });
+    });
+    appData.settings.musicSrcFixed = true;
+  }
 }
 
 let __saveTimer = null;
@@ -4206,8 +4214,11 @@ function restoreAllData(input) {
 }
 
 // ==================== 音乐播放器 ====================
-function musicStreamUrl(id) {
-  return 'https://music.163.com/song/media/outer/url?id=' + encodeURIComponent(id) + '.mp3';
+function musicStreamUrl(id, backup) {
+  if (backup) {
+    return 'https://music.163.com/song/media/outer/url?id=' + encodeURIComponent(id) + '.mp3';
+  }
+  return 'https://api.injahow.cn/meting/?server=netease&type=url&id=' + encodeURIComponent(id);
 }
 
 function musicApiUrl(id, type) {
@@ -4857,11 +4868,18 @@ function playMusic(id) {
       musicNext();
     });
     au.addEventListener('error', function () {
+      if (!au.dataset.triedBackup) {
+        au.dataset.triedBackup = '1';
+        au.src = musicStreamUrl(id, true);
+        const p2 = au.play();
+        if (p2 && p2.catch) p2.catch(function () {});
+        return;
+      }
       setMusicPlayIcon(false);
       const songs = getCurrentSongs();
       const s = songs.find(function (x) { return x.id === id; });
       if (s) { s.bad = true; saveData(); renderMusicList(); }
-      showToast('这首放不了，已标记');
+      showToast('这首放不了，可能下架了');
     });
     const pr = au.play();
     if (pr && pr.catch) pr.catch(function () { if (isCur()) setMusicPlayIcon(false); });
