@@ -17,3 +17,22 @@ self.addEventListener('notificationclick', function (event) {
     if (clients.openWindow) return clients.openWindow(target);
   }));
 });
+
+// v33.4：联网优先，装了新文件就取新的；断网时退回缓存
+self.addEventListener('fetch', function (event) {
+  if (event.request.method !== 'GET') return;
+  event.respondWith(
+    fetch(event.request).then(function (res) {
+      try {
+        var copy = res.clone();
+        caches.open('vislta-v33').then(function (c) { c.put(event.request, copy); });
+      } catch (e) {}
+      return res;
+    }).catch(function () {
+      return caches.match(event.request).then(function (m) {
+        return m || caches.match('./');
+      });
+    })
+  );
+});
+// network-first
