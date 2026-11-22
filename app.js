@@ -5177,13 +5177,91 @@ function computeStorageParts() {
     { label: '词条库', bytes: wordTotal },
     { label: '信件', bytes: letterTotal },
     { label: '其他（设置 / 问卷 / 规则）', bytes: rest },
-    { label: '合计', bytes: allTotal, strong: true }
+    { label: '合计（应用数据）', bytes: allTotal, strong: true }
   ];
 }
 function fmtBytes(n) {
   if (!n) return '0 KB';
   if (n > 1024 * 1024) return (n / 1024 / 1024).toFixed(2) + ' MB';
   return (n / 1024).toFixed(1) + ' KB';
+}
+// ===== 图片瘦身：把聊天图、朋友圈图重压一遍 =====
+function compressOneImage(src, maxSide, quality) {
+  return new Promise(function (res) {
+    const img = new Image();
+    img.onload = function () {
+      try {
+        let w = img.naturalWidth || img.width;
+        let h = img.naturalHeight || img.height;
+        if (!w || !h) return res(null);
+        const scale = Math.min(1, maxSide / Math.max(w, h));
+        w = Math.max(1, Math.round(w * scale));
+        h = Math.max(1, Math.round(h * scale));
+        const cv = document.createElement('canvas');
+        cv.width = w;
+        cv.height = h;
+        const ctx = cv.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        res(cv.toDataURL('image/jpeg', quality));
+      } catch (e) { res(null); }
+    };
+    img.onerror = function () { res(null); };
+    img.src = src;
+  });
+}
+function compressStoredImages() {
+  const targets = [];
+  const records = appData.chatRecords || {};
+  Object.keys(records).forEach(function (k) {
+    (records[k] || []).forEach(function (m) {
+      if (m && m.type === 'image' && typeof m.content === 'string' &&
+          m.content.indexOf('data:') === 0 && m.content.length > 120000) {
+        targets.push({ holder: m, key: 'content', src: m.content });
+      }
+    });
+  });
+  (appData.moments || []).forEach(function (mo) {
+    (mo.images || []).forEach(function (src, i) {
+      if (typeof src === 'string' && src.indexOf('data:') === 0 && src.length > 120000) {
+        targets.push({ holder: mo.images, key: i, src: src });
+      }
+    });
+  });
+  if (targets.length === 0) {
+    showToast('没有特别大的图，不用压');
+    return;
+  }
+  showToast('开始压 ' + targets.length + ' 张，别关掉');
+  let before = 0, after = 0, done = 0, i = 0;
+  const step = function () {
+    if (i >= targets.length) {
+      flushSaveData();
+      showToast('压了 ' + done + ' 张，省下 ' + fmtBytes(Math.max(0, before - after)));
+      setTimeout(function () { callStorageAllFiles(); }, 700);
+      return;
+    }
+    const t = targets[i++];
+    before += t.src.length;
+    compressOneImage(t.src, 720, 0.62).then(function (out) {
+      if (out && out.length < t.src.length) {
+        t.holder[t.key] = out;
+        after += out.length;
+        done++;
+      } else {
+        after += t.src.length;
+      }
+      step();
+    }).catch(function () {
+      after += t.src.length;
+      step();
+    });
+  };
+  step();
+}
+function callStorageAllFiles() {
+  try { showStorageUsage(); } catch (e) {}
 }
 function showStorageUsage() {
   flushSaveData();
@@ -5201,7 +5279,9 @@ function showStorageUsage() {
     </div>
     <div class="storage-quota" id="storageQuotaLine">容量：计算中…</div>
   `;
-  window.currentModalId = showModal('存储占用', body, `<button class="btn btn-secondary" onclick="closeModal(currentModalId)">关闭</button>`);
+  const footer = `<button class="btn btn-secondary" onclick="closeModal(currentModalId)">关闭</button>
+    <button class="btn btn-primary" onclick="compressStoredImages()">压缩大图</button>`;
+  window.currentModalId = showModal('存储占用', body, footer);
   if (navigator.storage && navigator.storage.estimate) {
     navigator.storage.estimate().then(function (est) {
       const line = document.getElementById('storageQuotaLine');
@@ -5209,7 +5289,7 @@ function showStorageUsage() {
       const used = est.usage || total;
       const quota = est.quota || 0;
       line.textContent = quota
-        ? '已用 ' + fmtBytes(used) + ' / 剩余 ' + fmtBytes(Math.max(0, quota - used)) + '（设备给的上限）'
+        ? '设备已用 ' + fmtBytes(used) + ' / 剩余 ' + fmtBytes(Math.max(0, quota - used)) + '（含缓存，不只是数据）'
         : '已用 ' + fmtBytes(used);
     }).catch(function () {});
   }
