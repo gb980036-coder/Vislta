@@ -5769,3 +5769,24 @@ input[type=range].vol-slider { width: 100%; accent-color: var(--primary); }
   border-radius: 50%;
 }
 .moment-card { position: relative; }
+
+
+/* 全屏 / 刘海屏：顶部安全区跟顶栏连成一片，别在它上面再压一条 */
+#app {
+  background: linear-gradient(to bottom,
+    var(--header-bg) 0,
+    var(--header-bg) env(safe-area-inset-top, 0px),
+    var(--bg-primary) calc(env(safe-area-inset-top, 0px) + 1px),
+    var(--bg-primary) 100%);
+}
+/* 顶栏自己那条雾，上沿再收薄一点，别像块板 */
+.chat-header,
+.page-header,
+.contacts-header,
+.letters-header,
+.sidebar-header {
+  background: linear-gradient(to bottom,
+    color-mix(in srgb, var(--header-bg) 92%, transparent) 0%,
+    color-mix(in srgb, var(--header-bg) 62%, transparent) 58%,
+    color-mix(in srgb, var(--header-bg) 22%, transparent) 100%);
+}
