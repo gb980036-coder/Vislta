@@ -308,7 +308,7 @@ function flushSaveData() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(appData));
   } catch (e) {
     console.error('保存数据失败', e);
-    showToast('保存数据失败');
+    showToast('存不下了。头像换张小图试试');
   }
 }
 
@@ -439,6 +439,79 @@ function fileToBase64(file) {
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+// 图片压缩：头像用256，图片消息用1280
+function compressImageFile(file, max, quality) {
+  max = max || 256;
+  quality = quality || 0.82;
+  return new Promise(function (resolve) {
+    var fr = new FileReader();
+    fr.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var scale = Math.min(1, max / Math.max(img.width || max, img.height || max));
+          var cw = Math.max(1, Math.round((img.width || max) * scale));
+          var ch = Math.max(1, Math.round((img.height || max) * scale));
+          var cv = document.createElement('canvas');
+          cv.width = cw;
+          cv.height = ch;
+          var ctx = cv.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, cw, ch);
+          ctx.drawImage(img, 0, 0, cw, ch);
+          resolve(cv.toDataURL('image/jpeg', quality));
+        } catch (e) {
+          resolve(fr.result);
+        }
+      };
+      img.onerror = function () { resolve(fr.result); };
+      img.src = fr.result;
+    };
+    fr.onerror = function () { resolve(''); };
+    fr.readAsDataURL(file);
+  });
+}
+
+// 老数据里的大头像一次性缩掉，免得把存储撑爆
+function autoShrinkAvatars() {
+  var KEY = 'avatar_shrunk_v32';
+  try { if (localStorage.getItem(KEY)) return; } catch (e) {}
+  var targets = [];
+  (appData.contacts || []).forEach(function (c) { if (c.avatar && c.avatar.length > 120000) targets.push(c); });
+  (appData.groups || []).forEach(function (g) { if (g.avatar && g.avatar.length > 120000) targets.push(g); });
+  if (appData.myProfile && appData.myProfile.avatar && appData.myProfile.avatar.length > 120000) targets.push(appData.myProfile);
+  if (!targets.length) { try { localStorage.setItem(KEY, '1'); } catch (e) {} return; }
+  var i = 0;
+  function step() {
+    if (i >= targets.length) {
+      flushSaveData();
+      try { localStorage.setItem(KEY, '1'); } catch (e) {}
+      try { renderConversations(); renderContacts(); updateMyAvatarPreview(); renderChatMessages(); } catch (e) {}
+      showToast('旧头像压小了，省出点空间');
+      return;
+    }
+    var t = targets[i++];
+    var img = new Image();
+    img.onload = function () {
+      try {
+        var scale = Math.min(1, 256 / Math.max(img.width || 256, img.height || 256));
+        var cv = document.createElement('canvas');
+        cv.width = Math.max(1, Math.round((img.width || 256) * scale));
+        cv.height = Math.max(1, Math.round((img.height || 256) * scale));
+        var ctx = cv.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, cv.width, cv.height);
+        ctx.drawImage(img, 0, 0, cv.width, cv.height);
+        t.avatar = cv.toDataURL('image/jpeg', 0.82);
+      } catch (e) {}
+      step();
+    };
+    img.onerror = function () { step(); };
+    img.src = t.avatar;
+  }
+  step();
 }
 
 // 下载JSON文件
@@ -1675,7 +1748,7 @@ function selectGroupOption(group) {
 function handleNewContactAvatar(event) {
   const file = event.target.files[0];
   if (file) {
-    fileToBase64(file).then(base64 => {
+    compressImageFile(file, 256, 0.82).then(base64 => {
       newContactAvatarData = base64;
       document.getElementById('newContactAvatarPreview').innerHTML = `<img src="${base64}">`;
     });
@@ -2023,7 +2096,7 @@ function generateGroupAvatar() {
 function handleNewGroupAvatar(event) {
   const file = event.target.files[0];
   if (file) {
-    fileToBase64(file).then(base64 => {
+    compressImageFile(file, 256, 0.82).then(base64 => {
       newGroupAvatarData = base64;
       document.getElementById('newGroupAvatarPreview').innerHTML = `<img src="${base64}">`;
     });
@@ -3839,17 +3912,17 @@ function pickAvatarFor(kind, id) {
   inp.onchange = function () {
     var f = inp.files && inp.files[0];
     if (!f) return;
-    var r = new FileReader();
-    r.onload = function () {
-      obj.avatar = r.result;
-      saveData();
+    showToast('正在处理图片');
+    compressImageFile(f, 256, 0.82).then(function (dataUrl) {
+      if (!dataUrl) { showToast('这张图读不出来'); return; }
+      obj.avatar = dataUrl;
+      flushSaveData();
       try { renderConversations(); } catch (e) {}
       try { renderContacts(); } catch (e) {}
       var w = document.getElementById('profileAvatarWrap');
       if (w) w.innerHTML = (kind === 'group') ? getGroupAvatarHTML(obj) : getAvatarHTML(obj.avatar, obj.name, 'lg');
       showToast('头像换好了');
-    };
-    r.readAsDataURL(f);
+    });
   };
   inp.click();
 }
@@ -5869,7 +5942,7 @@ document.getElementById('imageBtn').addEventListener('click', () => {
 document.getElementById('imageUpload').addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (file && appData.currentChatId) {
-    fileToBase64(file).then(base64 => {
+    compressImageFile(file, 1280, 0.8).then(base64 => {
       addMessage({
         type: 'image',
         content: base64,
@@ -6460,7 +6533,7 @@ function openAvatarSetting() {
 function handleAvatarUpload(event) {
   const file = event.target.files[0];
   if (file) {
-    fileToBase64(file).then(base64 => {
+    compressImageFile(file, 256, 0.82).then(base64 => {
       appData.myProfile.avatar = base64;
       saveData();
       document.getElementById('avatarSettingPreview').innerHTML = `<img src="${base64}" style="width:100%;height:100%;object-fit:cover;">`;
@@ -9202,7 +9275,7 @@ async function handleMomentsBgUpload(event) {
   if (!file) return;
   if (!file.type.startsWith('image/')) { showToast('请选择图片文件'); return; }
   try {
-    const compressed = await compressImage(file, 900, 0.75);
+    const compressed = await compressImageFile(file, 900, 0.75);
     appData.settings.momentsBgImage = compressed;
     saveData();
     applyMomentsBg();
@@ -9419,7 +9492,7 @@ async function handlePubImgUpload(event) {
     if (pubDraftImages.length >= 9) { showToast('最多9张图片'); break; }
     if (!file.type.startsWith('image/')) continue;
     try {
-      const compressed = await compressImage(file, 900, 0.75);
+      const compressed = await compressImageFile(file, 900, 0.75);
       pubDraftImages.push(compressed);
     } catch (e) {}
   }
@@ -11016,6 +11089,8 @@ function init() {
     const sp = document.getElementById('splashOverlay');
     if (sp) sp.remove();
   }, 2900);
+
+  setTimeout(autoShrinkAvatars, 1500);
 
   console.log('Vislta 已初始化');
 }
