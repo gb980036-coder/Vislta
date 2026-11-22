@@ -3117,6 +3117,33 @@ function renderQuoteBubble(quote, level = 0) {
   return `<div class="bubble quote">${nested}<strong>${sender}：</strong>${content}</div>`;
 }
 
+// ===== v34.2 全屏 / 键盘弹起时，按可视高度收 #app =====
+function initViewportHeight() {
+  const root = document.documentElement;
+  const apply = function () {
+    const vv = window.visualViewport;
+    const h = vv ? vv.height : window.innerHeight;
+    if (h && h > 200) root.style.setProperty('--app-h', Math.round(h) + 'px');
+  };
+  apply();
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', apply);
+    window.visualViewport.addEventListener('scroll', apply);
+  }
+  window.addEventListener('resize', apply);
+  window.addEventListener('orientationchange', function () { setTimeout(apply, 260); });
+  const mi = document.getElementById('messageInput');
+  if (mi) {
+    mi.addEventListener('focus', function () {
+      setTimeout(function () {
+        apply();
+        const cm = document.getElementById('chatMessages');
+        if (cm) cm.scrollTop = cm.scrollHeight;
+      }, 320);
+    });
+    mi.addEventListener('blur', function () { setTimeout(apply, 200); });
+  }
+}
 // ===== 31 联系人主动来信 =====
 const incomingLetterTimer = { id: null };
 function getIncomingLetterCfg() {
@@ -3201,11 +3228,19 @@ function openCallDetail(idx) {
   const footer = `<button class="btn btn-secondary" onclick="closeModal(currentModalId)">关闭</button>`;
   window.currentModalId = showModal('通话详情', body, footer);
 }
+function isEmojiContent(src) {
+  if (!src || typeof src !== 'string') return false;
+  const pools = [appData.myEmojis || [], appData.otherEmojis || []];
+  for (let i = 0; i < pools.length; i++) {
+    if (pools[i].indexOf(src) >= 0) return true;
+  }
+  return false;
+}
 function renderMessageBubble(msg, idx) {
   if (msg.type === 'image') {
-    // 判断是否为表情包（来自表情库的base64小图，无气泡背景直接展示）
-    const isEmoji = !!msg.isEmoji;
-    return `<div class="bubble ${isEmoji ? 'emoji-msg' : ''}"><img class="msg-img" src="${msg.content}" onclick="openImagePreview('${msg.content}')" alt="表情包"></div>`;
+    // 判断是否为表情包（自己发的、对方表情库里的，都算）
+    const isEmoji = !!msg.isEmoji || isEmojiContent(msg.content);
+    return `<div class="bubble ${isEmoji ? 'emoji-msg' : ''}"><img class="msg-img${isEmoji ? ' is-sticker' : ''}" src="${msg.content}" onclick="openImagePreview('${msg.content}')" alt="表情包"></div>`;
   }
   if (msg.type === 'call') {
     return `<div class="bubble call-bubble${msg.missed ? ' missed' : ''}" onclick="openCallDetail(${idx})"><i class="fas fa-phone"></i> ${escapeHtml(msg.content)}</div>`;
@@ -11886,6 +11921,7 @@ function init() {
   scheduleIncomingLetter();
   // 从 IndexedDB 补回大图
   hydrateFromIDB();
+  initViewportHeight();
   
   // 后台保活
   keepAlive();
