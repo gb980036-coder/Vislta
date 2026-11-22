@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Vislta</title>
 <link rel="stylesheet" href="https://fastly.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.1/css/all.min.css">
-<link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="perf.css">
+<link rel="stylesheet" href="style.css?v=33">
+<link rel="stylesheet" href="perf.css?v=33">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#3a7bd5">
 <meta name="mobile-web-app-capable" content="yes">
@@ -960,7 +960,6 @@
               </div>
               <div class="setting-desc" style="font-size:11px;padding:6px 2px 0;">开启后，此联系人的回复与回信只从 TA 的专属词库中抽取，不影响其他联系人</div>
             </div>
-            <div class="word-category-list" id="wordCategoryList"></div>
             <div style="padding:8px 12px;display:flex;gap:8px;">
               <input type="text" class="input" id="newWordInput" placeholder="输入新词条" style="flex:1;">
               <button class="btn btn-primary" style="padding:8px 12px;font-size:13px;" onclick="addWord()">添加</button>
@@ -984,7 +983,6 @@
               <button class="btn btn-secondary" style="padding:6px 10px;font-size:12px;" onclick="toggleWordManageMode()">取消</button>
               <span id="wordManageCount" style="font-size:11px;color:var(--text-tertiary);margin-left:auto;"></span>
             </div>
-            <div class="word-list" id="wordList"></div>
             <div style="padding:12px;display:flex;gap:8px;">
               <button class="btn btn-secondary" style="flex:1;padding:8px;font-size:12px;" onclick="openImportWordsModal()">
                 <i class="fas fa-file-import"></i> 导入
@@ -999,8 +997,11 @@
                 <i class="fas fa-trash"></i> 清空本类
               </button>
             </div>
+            <!-- v33：操作按键全部上移，分类和词条排在下面 -->
+            <div class="word-category-list" id="wordCategoryList"></div>
+            <div class="word-list" id="wordList"></div>
             <div style="padding:0 12px 12px;">
-              <button class="btn btn-danger" style="width:100%;padding:8px;font-size:12px;" onclick="clearAllWords()">
+              <button class="btn btn-secondary" style="width:100%;padding:6px;font-size:11px;opacity:.72;" onclick="clearAllWords()">
                 <i class="fas fa-trash-alt"></i> 清空所有词条
               </button>
             </div>
@@ -1298,6 +1299,6 @@
   </div>
 </div>
 
-<script src="app.js?v=32.2"></script>
+<script src="app.js?v=33"></script>
 </body>
 </html>

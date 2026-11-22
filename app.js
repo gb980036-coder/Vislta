@@ -2669,6 +2669,11 @@ function renderChatMessages() {
     container.scrollTop = container.scrollHeight;
   }
   updateScrollBottomUI(container);
+  // v33：切回会话时把“正在输入”补回去
+  const _tk = (appData.currentChatType === 'group' ? 'group_' : 'contact_') + appData.currentChatId;
+  if (typingState[_tk] && typingState[_tk].active) {
+    showTypingIndicator(typingState[_tk].chatType, typingState[_tk].chatId);
+  }
 }
 function getSenderAvatar(msg) {
   if (appData.settings.showMsgAvatar === false) return '';
@@ -3104,7 +3109,11 @@ document.getElementById('messageInput').addEventListener('keydown', (e) => {
 });
 
 // ==================== 自动回复 ====================
-let replyTimer = null;
+let replyTimer = null; // 旧变量，留着不动
+// v33：回复等待按会话分开，互不打断
+const replyTimers = {};
+// v33：哪个会话正在等回复（切走再切回来能补上“正在输入”）
+const typingState = {};
 
 // 获取指定会话的独立配置（已读不回/定时消息）
 function getConvSettings(chatType, chatId) {
@@ -3384,15 +3393,19 @@ function scheduleReply() {
   const targetType = appData.currentChatType;
   const targetId = appData.currentChatId;
   if (!targetId) return;
-  
-  if (replyTimer) clearTimeout(replyTimer);
-  
+
+  const rkey = (targetType === 'group' ? 'group_' : 'contact_') + targetId;
+  // 只清这个会话自己的等待，不碰别人的
+  if (replyTimers[rkey]) { clearTimeout(replyTimers[rkey]); delete replyTimers[rkey]; }
+
   const convSet = getConvSettings(targetType, targetId);
-  
+
   // 已读不回：按概率选择不回复，仅标记已读
   const rnc = convSet.readNoReplyChance !== undefined ? convSet.readNoReplyChance : 50;
   if (targetType !== 'group' && convSet.readNoReply && Math.random() * 100 < rnc) {
-    replyTimer = setTimeout(() => {
+    typingState[rkey] = null;
+    replyTimers[rkey] = setTimeout(() => {
+      delete replyTimers[rkey];
       markMyMsgRead(targetType, targetId, 'read-noreply');
       saveData();
       if (isViewingChat(targetType, targetId)) renderChatMessages();
@@ -3400,16 +3413,19 @@ function scheduleReply() {
     }, randomInt(1, 2) * 1000);
     return;
   }
-  
+
   const { replyDelayMin, replyDelayMax, replyCountMin, replyCountMax, wordsPerMessage } = appData.settings;
   const delay = randomInt(replyDelayMin, replyDelayMax) * 1000;
-  
-  // 显示正在输入（仅当前正在查看该会话时）
+
+  // 记下这个会话正在等，切走再切回来也能补上
+  typingState[rkey] = { active: true, chatType: targetType, chatId: targetId, at: Date.now(), delay: delay };
   if (isViewingChat(targetType, targetId)) {
     showTypingIndicator(targetType, targetId);
   }
-  
-  replyTimer = setTimeout(() => {
+
+  replyTimers[rkey] = setTimeout(() => {
+    delete replyTimers[rkey];
+    typingState[rkey] = null;
     if (isViewingChat(targetType, targetId)) hideTypingIndicator();
     if (targetType !== 'group') {
       markMyMsgRead(targetType, targetId, 'read-reply');
@@ -3418,8 +3434,6 @@ function scheduleReply() {
     if (isViewingChat(targetType, targetId)) renderChatMessages();
   }, delay);
 }
-
-
 // ==================== 输入区辅助 ====================
 
 function showTypingIndicator(chatType, chatId) {
@@ -7790,18 +7804,46 @@ function acceptCall() {
     type: 'call',
     content: callContent,
     sender: callSender,
-    time: Date.now()
+    time: Date.now(),
+    callDirection: wasIncoming ? 'incoming' : 'outgoing',
+    callChatType: callState.chatType || 'contact'
   });
+  // 记住是哪一条，挂断时按它回写时长（中间来多少消息都不丢）
+  callState.recordKey = key;
+  callState.recordIndex = appData.chatRecords[key].length - 1;
   saveData();
   renderChatMessages();
   renderConversations();
 }
 
+// v33：通话时长统一 时:分:秒
+function formatCallDuration(sec) {
+  sec = Math.max(0, Math.floor(sec || 0));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s2 = sec % 60;
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s2).padStart(2, '0');
+}
+// v33：按索引/回溯找那条通话记录
+function findCallRecord(arr, idx) {
+  if (!arr || !arr.length) return null;
+  if (typeof idx === 'number' && arr[idx] && arr[idx].type === 'call') return arr[idx];
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].type === 'call') return arr[i];
+  }
+  return null;
+}
+// v33：通知图标（不再落成系统默认的 G）
+function appNotifyIcon() {
+  const svg = "<svg xmlns='http://www.w3.org/2000/svg' width='192' height='192'>"
+    + "<rect width='192' height='192' rx='46' fill='#7EB8DA'/>"
+    + "<circle cx='96' cy='74' r='30' fill='#ffffff'/>"
+    + "<path d='M42 168c0-30 24-54 54-54s54 24 54 54z' fill='#ffffff'/></svg>";
+  return 'data:image/svg+xml,' + encodeURIComponent(svg);
+}
 function updateCallTimer() {
   const elapsed = Math.floor((Date.now() - callState.startTime) / 1000);
-  const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
-  const secs = (elapsed % 60).toString().padStart(2, '0');
-  const timeStr = `${mins}:${secs}`;
+  const timeStr = formatCallDuration(elapsed);
   
   document.getElementById('callTimer').textContent = timeStr;
   document.getElementById('floatingCallTime').textContent = timeStr;
@@ -7818,13 +7860,14 @@ function hangUp() {
   }
   
   // 写入通话结束记录
+  const ckey = callState.recordKey || getCallRecordKey();
+  if (!appData.chatRecords[ckey]) appData.chatRecords[ckey] = [];
+  const carr = appData.chatRecords[ckey];
+
   if (callState.type === 'connected') {
-    const key = getCallRecordKey();
-    const elapsed = Math.floor((Date.now() - callState.startTime) / 1000);
-    const mins = Math.floor(elapsed / 60);
-    const secs = elapsed % 60;
-    const durationStr = mins > 0 ? `${mins}分${secs}秒` : `${secs}秒`;
-    
+    const elapsed = Math.max(0, Math.floor((Date.now() - callState.startTime) / 1000));
+    const durationStr = formatCallDuration(elapsed);
+
     let endContent;
     if (callState.chatType === 'group') {
       const names = callState.members.map(m => m.name);
@@ -7834,13 +7877,28 @@ function hangUp() {
     } else {
       endContent = `语音通话 ${durationStr}`;
     }
-    
-    if (appData.chatRecords[key]) {
-      const lastMsg = appData.chatRecords[key][appData.chatRecords[key].length - 1];
-      if (lastMsg && lastMsg.type === 'call') {
-        lastMsg.content = endContent;
-      }
+
+    const target = findCallRecord(carr, callState.recordIndex);
+    if (target) {
+      target.content = endContent;
+      target.duration = elapsed;
+      target.durationText = durationStr;
+      target.hangupBy = 'self';
     }
+    saveData();
+    renderChatMessages();
+    renderConversations();
+  } else if (callState.type === 'incoming') {
+    // 响铃没接就挂断，也留一条
+    carr.push({
+      type: 'call',
+      content: '未接来电',
+      sender: callState.contactId,
+      time: Date.now(),
+      callDirection: 'incoming',
+      callChatType: 'contact',
+      missed: true
+    });
     saveData();
     renderChatMessages();
     renderConversations();
@@ -8041,19 +8099,7 @@ function triggerIncomingCall() {
   // 响铃超时自动挂断
   setTimeout(() => {
     if (callState.active && callState.type === 'incoming') {
-      hangUp();
-      // 写入未接来电
-      const key = 'contact_' + callState.contactId;
-      if (!appData.chatRecords[key]) appData.chatRecords[key] = [];
-      appData.chatRecords[key].push({
-        type: 'call',
-        content: '未接来电',
-        sender: callState.contactId,
-        time: Date.now()
-      });
-      saveData();
-      renderChatMessages();
-      renderConversations();
+      hangUp(); // 未接记录由 hangUp 统一写入
     }
   }, 30000);
   
@@ -8149,6 +8195,8 @@ function showNotification(title, body, options) {
 
   const opt = {
     body: body || '',
+    icon: options.icon || appNotifyIcon(),
+    badge: options.badge || options.icon || appNotifyIcon(),
     tag: tag,
     renotify: true,
     silent: false,
@@ -9807,68 +9855,128 @@ function aiPostMoment() {
   if (window.currentPage === 'moments') renderMomentsFeed();
 }
 
-// 我发布动态后，AI 延迟浏览
-function scheduleAiBrowseDelay() {
-  if (appData.contacts.length === 0) return;
-  const delay = randomInt(4000, 15000);
-  const t = setTimeout(() => { aiBrowseMyMoments(); managedTimers.aiBrowse = null; }, delay);
-  managedTimers.aiBrowse = t;
+// ===== v33：朋友圈互动参数（没设过就用默认值）=====
+function getMomentsCfg() {
+  const st = appData.settings || {};
+  const num = (v, d) => (typeof v === 'number' && !isNaN(v)) ? v : d;
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const bMin = clamp(num(st.momentsBrowseMinMin, 5), 1, 1440);
+  const bMax = clamp(num(st.momentsBrowseMaxMin, 180), bMin, 1440);
+  const pMin = clamp(num(st.momentsPostIntervalMin, 30), 1, 1440);
+  const pMax = clamp(num(st.momentsPostIntervalMax, 1440), pMin, 1440);
+  let dMin = clamp(num(st.momentsDailyMin, 1), 0, 50);
+  let dMax = clamp(num(st.momentsDailyMax, 3), dMin, 50);
+  let wMin = clamp(num(st.momentsWordMin, 2), 1, 30);
+  let wMax = clamp(num(st.momentsWordMax, 5), wMin, 30);
+  return {
+    like: clamp(num(st.momentsLikeChance, 65), 0, 100) / 100,
+    comment: clamp(num(st.momentsCommentChance, 50), 0, 100) / 100,
+    reply: clamp(num(st.momentsReplyChance, 40), 0, 100) / 100,
+    interact: clamp(num(st.momentsInteractChance, 35), 0, 100) / 100,
+    browseMinMin: bMin,
+    browseMaxMin: bMax,
+    autoPost: st.momentsAutoPost !== false,
+    postIntervalMin: pMin,
+    postIntervalMax: pMax,
+    dailyMin: dMin,
+    dailyMax: dMax,
+    wordMin: wMin,
+    wordMax: wMax,
+    commentTypes: (Array.isArray(st.momentsCommentTypes) && st.momentsCommentTypes.length)
+      ? st.momentsCommentTypes : ['text', 'kaomoji', 'emoji'],
+    postTypes: (Array.isArray(st.momentsPostTypes) && st.momentsPostTypes.length)
+      ? st.momentsPostTypes : ['text', 'image', 'kaomoji', 'emoji', 'sticker']
+  };
+}
+const MOMENT_KAOMOJI = ['(￣▽￣)', '(*/ω＼*)', '(๑•̀ㅂ•́)و', '(´,,•ω•,,)', '(づ｡◕‿‿◕｡)づ', '(*´▽`*)', '(๑´ω`๑)'];
+const MOMENT_EMOJI = ['😂', '🥰', '👍', '🤣', '😭', '💗', '👀', '✨'];
+
+function pickContactWords(c) {
+  const cs = peekConvSettings('contact', c.id);
+  let src = null;
+  if (cs && cs.wordsIndependent && Array.isArray(cs.wordGroups) && cs.wordGroups.length > 0) src = cs.wordGroups;
+  else if (appData.wordGroups.length > 0) src = appData.wordGroups;
+  const words = [];
+  (src || []).forEach(g => pushGroupWords(g, words));
+  return words;
+}
+// 按设置的评论类型抽一句话
+function genMomentCommentText(c) {
+  const cfg = getMomentsCfg();
+  const type = cfg.commentTypes[Math.floor(Math.random() * cfg.commentTypes.length)];
+  if (type === 'kaomoji') return MOMENT_KAOMOJI[Math.floor(Math.random() * MOMENT_KAOMOJI.length)];
+  if (type === 'emoji') return MOMENT_EMOJI[Math.floor(Math.random() * MOMENT_EMOJI.length)];
+  const words = pickContactWords(c);
+  if (!words.length) return null;
+  const cnt = randomInt(1, 2);
+  const parts = [];
+  for (let i = 0; i < cnt; i++) parts.push(randomPick(words));
+  return parts.join('，');
 }
 
-// AI 浏览我的动态：写访客记录 + 随机点赞 + 词库评论
-function aiBrowseMyMoments() {
+// 我发布动态后，AI 延迟浏览（分三波来人，不再只来一个）
+function scheduleAiBrowseDelay() {
+  if (appData.contacts.length === 0) return;
+  const cfg = getMomentsCfg();
+  const minMs = cfg.browseMinMin * 60 * 1000;
+  const maxMs = cfg.browseMaxMin * 60 * 1000;
+  const waves = [
+    randomInt(4000, 15000),
+    randomInt(minMs, maxMs),
+    randomInt(minMs, maxMs)
+  ];
+  waves.forEach((delay, idx) => {
+    trackManagedTimeout('aiBrowseWaves', () => {
+      aiBrowseMyMoments(idx === 0 ? randomInt(1, 2) : 1);
+    }, delay);
+  });
+}
+// AI 浏览我的动态：写访客 + 点赞 + 评论，一次来一到三个人
+function aiBrowseMyMoments(count) {
   const myMoments = appData.moments.filter(m => isSelf(m.authorId));
   if (myMoments.length === 0 || appData.contacts.length === 0) return;
-  const m = myMoments[Math.floor(Math.random() * myMoments.length)];
-  const c = appData.contacts[Math.floor(Math.random() * appData.contacts.length)];
-  if (!c || !m) return;
-
-  // 访客记录（同一人不重复写）
-  if (!m.viewers.some(v => v.id === c.id)) {
-    m.viewers.push({ id: c.id, name: c.name, time: Date.now() });
-  }
-
+  const cfg = getMomentsCfg();
+  const total = Math.max(1, count || randomInt(1, 3));
+  const pool = appData.contacts.slice();
   let interacted = false;
-  // 随机点赞（未点过时 65% 概率）
-  if (!m.likes.includes(c.id) && Math.random() < 0.65) {
-    m.likes.push(c.id);
-    interacted = true;
-  }
-  // 评论：优先读联系人独立词条库，无独立读全局，再无词条则只点赞不输出文字
-  const cs = peekConvSettings('contact', c.id);
-  let wordSource = null;
-  if (cs && cs.wordsIndependent && Array.isArray(cs.wordGroups) && cs.wordGroups.length > 0) {
-    wordSource = cs.wordGroups;
-  } else if (appData.wordGroups.length > 0) {
-    wordSource = appData.wordGroups;
-  }
-  const words = [];
-  (wordSource || []).forEach(g => pushGroupWords(g, words));
 
-  if (words.length > 0 && Math.random() < 0.5) {
-    const cnt = randomInt(1, 2);
-    const parts = [];
-    for (let i = 0; i < cnt; i++) parts.push(randomPick(words));
-    m.comments.push({
-      id: 'cmc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
-      authorId: c.id, text: parts.join('，'), replyTo: null, time: Date.now()
-    });
-    interacted = true;
+  for (let i = 0; i < total && pool.length > 0; i++) {
+    const c = pool.splice(Math.floor(Math.random() * pool.length), 1)[0];
+    const m = myMoments[Math.floor(Math.random() * myMoments.length)];
+    if (!c || !m) continue;
+
+    if (!m.viewers.some(v => v.id === c.id)) {
+      m.viewers.push({ id: c.id, name: c.name, time: Date.now() });
+    }
+    if (!m.likes.includes(c.id) && Math.random() < cfg.like) {
+      m.likes.push(c.id);
+      interacted = true;
+    }
+    if (Math.random() < cfg.comment) {
+      const txt = genMomentCommentText(c);
+      if (txt) {
+        m.comments.push({
+          id: 'cmc_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+          authorId: c.id, text: txt, replyTo: null, time: Date.now()
+        });
+        interacted = true;
+      }
+    }
   }
 
   saveData();
   if (interacted) {
     bumpMomentsUnread(1);
-    // 朋友圈评论/点赞通知音效（受朋友圈独立免打扰控制）
     playNotifySound('moments', {});
   }
   if (window.currentPage === 'moments') renderMomentsFeed();
 }
-
 // AI 二次回复我的评论
 function aiReplyToComment(momentId, myCommentId) {
   const m = getMomentById(momentId);
   if (!m) return;
+  // v33：按设置的概率决定回不回
+  if (Math.random() > getMomentsCfg().reply) return;
   const myCm = m.comments.find(c => c.id === myCommentId);
   if (!myCm) return;
   // 找到我回复的那条AI评论的作者
