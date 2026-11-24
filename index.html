@@ -8,8 +8,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Vislta</title>
 <link rel="stylesheet" href="https://fastly.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.1/css/all.min.css">
-<link rel="stylesheet" href="style.css?v=34.4">
-<link rel="stylesheet" href="perf.css?v=34.4">
+<link rel="stylesheet" href="style.css?v=34.9">
+<link rel="stylesheet" href="perf.css?v=34.9">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#3a7bd5">
 <meta name="mobile-web-app-capable" content="yes">
@@ -875,6 +875,13 @@
               </div>
               <div class="toggle" id="mmAutoPost"></div>
             </div>
+            <div class="setting-item" onclick="aiPostMoment(true)">
+              <div class="setting-content" style="padding-left:60px;">
+                <div class="setting-label">现在就让 TA 发一条</div>
+                <div class="setting-desc">点了立刻发，不等定时，用来验证通不通</div>
+              </div>
+              <i class="fas fa-bolt" style="color:var(--primary);"></i>
+            </div>
             <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:9px;padding-left:60px;padding-right:16px;">
               <div class="setting-label">互动概率</div>
               <div class="mm-line"><span>评论</span><input type="number" class="setting-num-input mm-num" data-mk="momentsCommentChance" min="0" max="100" step="5" value="50"><span>%</span><span class="mm-gap">点赞</span><input type="number" class="setting-num-input mm-num" data-mk="momentsLikeChance" min="0" max="100" step="5" value="65"><span>%</span></div>
@@ -888,12 +895,12 @@
             </div>
             <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:9px;padding-left:60px;padding-right:16px;">
               <div class="setting-label">联系人发动态间隔</div>
-              <div class="setting-desc">单位分钟，30 到 1440 就是半小时到 24 小时</div>
+              <div class="setting-desc">单位分钟。右边那个数越大越发得越慢，1440 就是一天最多一条</div>
               <div class="mm-line"><input type="number" class="setting-num-input mm-num" data-mk="momentsPostIntervalMin" min="1" max="1440" value="30"><span>分 到</span><input type="number" class="setting-num-input mm-num" data-mk="momentsPostIntervalMax" min="1" max="1440" value="1440"><span>分</span></div>
             </div>
             <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:9px;padding-left:60px;padding-right:16px;">
               <div class="setting-label">每天发几条</div>
-              <div class="mm-line"><input type="number" class="setting-num-input mm-num" data-mk="momentsDailyMin" min="0" max="50" value="1"><span>到</span><input type="number" class="setting-num-input mm-num" data-mk="momentsDailyMax" min="0" max="50" value="3"><span>条</span></div>
+              <div class="mm-line"><input type="number" class="setting-num-input mm-num" data-mk="momentsDailyMin" min="1" max="50" value="1"><span>到</span><input type="number" class="setting-num-input mm-num" data-mk="momentsDailyMax" min="1" max="50" value="3"><span>条</span></div>
             </div>
             <div class="setting-item" style="flex-direction:column;align-items:stretch;gap:9px;padding-left:60px;padding-right:16px;">
               <div class="setting-label">每条用几张字卡</div>
@@ -1356,6 +1363,7 @@
   <div class="menu-item" onclick="quoteMessageFromMenu()"><i class="fas fa-quote-left"></i> 引用</div>
   <div class="menu-item" id="menuCopyTextItem" style="display:none;" onclick="copyTextFromMenu()"><i class="fas fa-copy"></i> 复制文本</div>
   <div class="menu-item" onclick="addReactionFromMenu()"><i class="fas fa-face-smile"></i> 表情回应</div>
+  <div class="menu-item" id="menuEditItem" style="display:none;" onclick="editMessageFromMenu()"><i class="fas fa-pen"></i> 编辑</div>
   <div class="menu-item" id="menuRecallItem" style="display:none;" onclick="recallMessageFromMenu()"><i class="fas fa-rotate-left"></i> 撤回</div>
   <div class="menu-item" onclick="forwardMessageFromMenu()"><i class="fas fa-share"></i> 转发</div>
   <div class="menu-item" onclick="startMultiSelectMode()"><i class="fas fa-check-double"></i> 多选</div>
@@ -1423,6 +1431,6 @@
   </div>
 </div>
 
-<script src="app.js?v=34.4"></script>
+<script src="app.js?v=34.9"></script>
 </body>
 </html>

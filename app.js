@@ -377,23 +377,37 @@ function slimForLocal(obj) {
 function flushSaveData() {
   if (__saveTimer) { clearTimeout(__saveTimer); __saveTimer = null; }
   const raw = JSON.stringify(appData);
+
+  // v34.9：已经切过大容量存储，就别再每次试 localStorage 那一遍了。
+  // 否则每存一次都超限、每存一次弹一次提示。
+  if (__idbMode) {
+    idbSet('data', raw).catch(function () {});
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(slimForLocal(appData))); } catch (e) {}
+    return;
+  }
+
   try {
     localStorage.setItem(STORAGE_KEY, raw);
-    if (__idbMode) idbSet('data', raw).catch(function () {});
   } catch (e) {
     console.error('保存数据失败', e);
-    // 装不下了：先写进 IndexedDB，再拿瘦身版占住 localStorage
+    // 第一次装不下：写进 IndexedDB，再拿瘦身版占住 localStorage，只提示一次
     idbSet('data', raw).then(function () {
+      let slimOk = true;
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(slimForLocal(appData)));
         localStorage.setItem(IDB_FLAG, '1');
-        __idbMode = true;
-        showToast('已切换到大容量存储');
       } catch (e2) {
-        showToast('存不下了。头像换张小图试试');
+        slimOk = false;
+      }
+      if (!__idbMode) {
+        __idbMode = true;
+        showToast(slimOk ? '已切换到大容量存储' : '数据已存进大容量存储，本地那格装不下瘦身版');
       }
     }).catch(function () {
-      showToast('存不下了。头像换张小图试试');
+      if (!window.__idbFailToastAt || Date.now() - window.__idbFailToastAt > 60000) {
+        window.__idbFailToastAt = Date.now();
+        showToast('存不下了。头像换张小图试试');
+      }
     });
   }
 }
@@ -423,7 +437,8 @@ function refreshAfterHydrate() {
 // 高频操作合并写，减少卡顿；关页前会自动落盘
 function saveData() {
   if (__saveTimer) clearTimeout(__saveTimer);
-  __saveTimer = setTimeout(flushSaveData, 300);
+  // 大容量模式下整包 JSON 更大，合并写的时间拉长一点，少卡一下
+  __saveTimer = setTimeout(flushSaveData, __idbMode ? 1200 : 300);
 }
 
 window.addEventListener('pagehide', flushSaveData);
@@ -1803,6 +1818,7 @@ function initToggles() {
       mmT.classList.toggle('active', appData.settings.momentsAutoPost !== false);
       mmT.addEventListener('click', function () {
         appData.settings.momentsAutoPost = !(appData.settings.momentsAutoPost !== false);
+        appData.settings.autoMoments = appData.settings.momentsAutoPost !== false;
         this.classList.toggle('active', appData.settings.momentsAutoPost);
         saveData();
         scheduleAiMomentsTimer();
@@ -2841,12 +2857,15 @@ function selectConversation(id, type) {
 
   chatInputArea.style.display = 'flex';
   
-  // 清除该会话未读标记
+  // 清除该会话未读标记（先算出未读条数，用于「以下是新消息」分隔线）
   const key = (type === 'group' ? 'group_' : 'contact_') + id;
+  const unreadCnt = appData.unreadMap[key] || 0;
   if (appData.unreadMap[key]) {
     delete appData.unreadMap[key];
     saveData();
   }
+  const _msgs = appData.chatRecords[key] || [];
+  unreadDivider = { key: key, at: unreadCnt > 0 ? Math.max(0, _msgs.length - unreadCnt) : -1 };
   
   // 清空待引用状态
   clearPendingQuote(true);
@@ -3014,7 +3033,12 @@ function renderChatMessages() {
       html += `<div class="msg-time">${formatFullTime(msg.time).split(' ')[1]}</div>`;
     }
     lastTime = msg.time;
-    
+
+    // 未读分隔线：只在本次进入会话的第一屏出现
+    if (unreadDivider.key === key && unreadDivider.at >= 0 && idx === unreadDivider.at) {
+      html += '<div class="unread-divider"><span>以下是新消息</span></div>';
+    }
+
     const isMine = isSelf(msg.sender);
     
     if (msg.type === 'poke') {
@@ -3050,6 +3074,7 @@ function renderChatMessages() {
           ${isMine && idx === lastMyMsgIdx && msg.readStatus && appData.settings.showReadStatus !== false ? 
             `<div class="msg-read-status ${msg.readStatus}">${msg.readStatus === 'read-noreply' ? escapeHtml(appData.settings.readNoReplyText || '已读，对方不想回') : escapeHtml(appData.settings.readText || '已读')}</div>` : ''}
           ${expandedTimeIdxs.has(idx) ? `<div class="msg-tap-time">${formatFullTime(msg.time)}</div>` : ''}
+          ${msg.edited ? `<div class="msg-tap-time">已编辑</div>` : ''}
           ${msg.reactions && msg.reactions.length > 0 ? renderMsgReactions(msg.reactions, idx) : ''}
         </div>
       </div>
@@ -3388,6 +3413,51 @@ function quoteMessageFromMenu() {
   renderQuotePreviewBar();
 }
 
+// 编辑已发出的文本消息
+function editMessageFromMenu() {
+  hideMsgContextMenu();
+  const idx = msgMenuTargetIndex;
+  if (idx < 0) return;
+  const key = (appData.currentChatType === 'group' ? 'group_' : 'contact_') + appData.currentChatId;
+  const records = appData.chatRecords[key] || [];
+  const msg = records[idx];
+  if (!msg) return;
+  if (!isSelf(msg.sender) || msg.type !== 'text' || msg.recalled) { showToast('这条改不了'); return; }
+  const body = `
+    <div class="form-group">
+      <label>改这条消息</label>
+      <textarea class="textarea" id="editMsgInput" rows="4" style="width:100%;">${escapeHtml(msg.content || '')}</textarea>
+    </div>
+    <div class="setting-desc" style="font-size:11px;">改完会在时间下面标一个「已编辑」</div>
+  `;
+  const footer = `
+    <button class="btn btn-secondary" onclick="closeModal(window.currentModalId)">取消</button>
+    <button class="btn btn-primary" onclick="applyMessageEdit(${idx})">保存</button>
+  `;
+  window.currentModalId = showModal('编辑消息', body, footer);
+  setTimeout(function () {
+    const el = document.getElementById('editMsgInput');
+    if (el) { el.focus(); try { el.setSelectionRange(el.value.length, el.value.length); } catch (e) {} }
+  }, 120);
+}
+function applyMessageEdit(idx) {
+  const el = document.getElementById('editMsgInput');
+  if (!el) return;
+  const val = (el.value || '').trim();
+  if (!val) { showToast('不能改成空的'); return; }
+  const key = (appData.currentChatType === 'group' ? 'group_' : 'contact_') + appData.currentChatId;
+  const records = appData.chatRecords[key] || [];
+  const msg = records[idx];
+  if (!msg) { showToast('这条找不到了'); return; }
+  if (val === msg.content) { closeModal(window.currentModalId); return; }
+  msg.content = val;
+  msg.edited = true;
+  msg.editedAt = Date.now();
+  saveData();
+  closeModal(window.currentModalId);
+  renderChatMessages();
+  showToast('已改');
+}
 // 删除单条消息（本地删除，无撤回提示）
 function deleteMessageFromMenu() {
   hideMsgContextMenu();
@@ -3475,6 +3545,8 @@ function renderQuotePreviewBar() {
 // ==================== 消息长按/右键菜单 ====================
 let msgMenuTargetIndex = -1;
 let longPressTimer = null;
+// v34.7 未读分隔线
+let unreadDivider = { key: '', at: -1 };
 
 function showMsgContextMenu(x, y, msgIndex) {
   const menu = document.getElementById('msgContextMenu');
@@ -3488,6 +3560,8 @@ function showMsgContextMenu(x, y, msgIndex) {
   const saveImgItem = document.getElementById('menuSaveImgItem');
   if (recallItem) recallItem.style.display = (msg && canRecallMsg(msg)) ? '' : 'none';
   if (saveImgItem) saveImgItem.style.display = (msg && msg.type === 'image' && !msg.recalled) ? '' : 'none';
+  const editItem = document.getElementById('menuEditItem');
+  if (editItem) editItem.style.display = (msg && isSelf(msg.sender) && msg.type === 'text' && !msg.recalled) ? '' : 'none';
   const copyItem = document.getElementById('menuCopyTextItem');
   if (copyItem) copyItem.style.display = (msg && msg.type === 'text' && !msg.recalled) ? '' : 'none';
   // 存入字卡库：仅自己的文本消息
@@ -5015,6 +5089,10 @@ function renderMusicList() {
 function initMusicFab() {
   const fab = document.getElementById('musicFab');
   if (!fab) return;
+  // v34.5：applyTheme 会被反复调用，这里必须幂等。否则每次切主题都会再绑一套监听，
+  // 点一下等于连点好几次，面板开了又关，看起来就是“点不开”。
+  if (fab.dataset.fabInited === '1') return;
+  fab.dataset.fabInited = '1';
   if (appData.settings.musicFabHidden) fab.style.display = 'none';
   const pos = appData.settings.musicFabPos;
   if (pos && typeof pos.x === 'number' && typeof pos.y === 'number') {
@@ -5026,7 +5104,7 @@ function initMusicFab() {
     fab.style.right = 'auto';
     fab.style.bottom = 'auto';
   }
-  let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false, moved = false, lastDragEnd = 0;
+  let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false, moved = false, lastDragEnd = 0, lastToggleAt = 0;
   // v33.4：手指点一下会抖，阈值放宽；拖完不留后遗症
   let justDragged = false;
   fab.addEventListener('pointerdown', function (e) {
@@ -5059,12 +5137,19 @@ function initMusicFab() {
       justDragged = true;
       setTimeout(function () { justDragged = false; }, 350);
       saveData();
+    } else {
+      // 没拖动 = 点了一下。不单纯依赖 click（有的 WebView 被 pointer capture 吞掉）
+      if (Date.now() - lastToggleAt < 400) return;
+      lastToggleAt = Date.now();
+      toggleMusicPanel();
     }
   });
   fab.addEventListener('pointercancel', function () { dragging = false; });
   fab.addEventListener('click', function (e) {
     // 刚拖过就吞掉这次点击；平时点一下立刻开
     if (justDragged) { justDragged = false; e.preventDefault(); e.stopPropagation(); return; }
+    if (Date.now() - lastToggleAt < 400) { e.preventDefault(); e.stopPropagation(); return; }
+    lastToggleAt = Date.now();
     toggleMusicPanel();
   });
 }
@@ -5880,7 +5965,8 @@ const SETTINGS_HUB_ITEMS = [
   { id: 'backupCollapsible', icon: 'fa-database', title: '数据备份' },
   { action: 'surveyEditor', icon: 'fa-pen-to-square', title: '问卷编辑器' },
   { action: 'mySurveyLib', icon: 'fa-folder-open', title: '我的问卷库' },
-  { action: 'quickSurvey', icon: 'fa-paper-plane', title: '发问卷给Ta' }
+  { action: 'quickSurvey', icon: 'fa-paper-plane', title: '发问卷给Ta' },
+  { action: 'selfCheck', icon: 'fa-stethoscope', title: '自检' }
 ];
 
 function openChatSettingsHub() {
@@ -5906,6 +5992,7 @@ function openChatSettingsHub() {
         if (it.action === 'surveyEditor') { openMySurveyLibEditor(null); return; }
         if (it.action === 'mySurveyLib') { openMySurveyPicker(); return; }
         if (it.action === 'quickSurvey') { openSurveyQuickMenu(); return; }
+        if (it.action === 'selfCheck') { setTimeout(runSelfCheck, 120); return; }
         return;
       }
       jumpToSettingsPanel(it.id);
@@ -10750,12 +10837,12 @@ function clearMomentsUnread() {
 // ---------- AI 朋友圈行为 ----------
 // AI 定时发布 + 浏览我方动态
 function scheduleAiMomentsTimer() {
+  // v34.8 朋友圈调度：只认面板里的「联系人发朋友圈」，不再要求旧开关 autoMoments
   if (managedTimers.aiMoments) { clearTimeout(managedTimers.aiMoments); managedTimers.aiMoments = null; }
-  if (!appData.settings.autoMoments) return;
   if (!getMomentsCfg().autoPost) return;
   const loop = function () {
     managedTimers.aiMoments = setTimeout(function () {
-      if (!appData.settings.autoMoments || !getMomentsCfg().autoPost) return;
+      if (!getMomentsCfg().autoPost) return;
       aiMomentsTick();
       loop();
     }, nextAiMomentDelay());
@@ -10815,9 +10902,9 @@ function makeMomentGenImage(kind) {
   return cv.toDataURL('image/jpeg', 0.6);
 }
 // AI 发布朋友圈（文字 / 图片 / 颜文字 / emoji / 表情包）
-function aiPostMoment() {
+function aiPostMoment(force) {
   const cfg = getMomentsCfg();
-  if (!cfg.autoPost) return;
+  if (!force && !cfg.autoPost) return;
   if (appData.contacts.length === 0) return;
   const c = appData.contacts[Math.floor(Math.random() * appData.contacts.length)];
   if (!c) return;
@@ -10875,7 +10962,7 @@ function getMomentsCfg() {
   const bMax = clamp(num(st.momentsBrowseMaxMin, 180), bMin, 1440);
   const pMin = clamp(num(st.momentsPostIntervalMin, 30), 1, 1440);
   const pMax = clamp(num(st.momentsPostIntervalMax, 1440), pMin, 1440);
-  let dMin = clamp(num(st.momentsDailyMin, 1), 0, 50);
+  let dMin = clamp(num(st.momentsDailyMin, 1), 1, 50);
   let dMax = clamp(num(st.momentsDailyMax, 3), dMin, 50);
   let wMin = clamp(num(st.momentsWordMin, 2), 1, 30);
   let wMax = clamp(num(st.momentsWordMax, 5), wMin, 30);
@@ -11952,6 +12039,13 @@ function renderAdvToolsPanel() {
   const body = document.getElementById('advToolsPanelBody');
   if (!body) return;
   body.innerHTML = `
+    <div class="setting-item" onclick="runSelfCheck()">
+      <div class="setting-content" style="padding-left:60px;">
+        <div class="setting-label">自检（找 bug）</div>
+        <div class="setting-desc">扫一遍元素、按钮绑定、数据、存储、定时任务，顺便看最近抓到的报错</div>
+      </div>
+      <i class="fas fa-stethoscope" style="color:var(--text-tertiary);"></i>
+    </div>
     <div class="setting-item" onclick="resetThemeStyleOnly()">
       <div class="setting-content" style="padding-left:60px;">
         <div class="setting-label">一键重置主题样式配置</div>
@@ -12249,3 +12343,224 @@ setTimeout(function () {
     }
   } catch (e) {}
 }, 800);
+
+
+// ==================== 自检 / 诊断（v34.6） ====================
+const SELF_CHECK_VER = '34.9';
+const ERR_LOG_KEY = 'vislta_error_log';
+const ERR_LOG_MAX = 80;
+
+function installErrorTrap() {
+  if (window.__errTrapInstalled) return;
+  window.__errTrapInstalled = true;
+  window.addEventListener('error', function (e) {
+    try {
+      pushErrLog({
+        t: Date.now(),
+        m: (e && e.message) || 'unknown error',
+        s: (e && e.filename ? String(e.filename).split('/').pop() : '') + ':' + ((e && e.lineno) || 0)
+      });
+    } catch (err) {}
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    try {
+      const r = e && e.reason;
+      pushErrLog({ t: Date.now(), m: 'Promise: ' + ((r && (r.message || r)) || 'unknown'), s: '' });
+    } catch (err) {}
+  });
+}
+function getErrLog() {
+  try { return JSON.parse(localStorage.getItem(ERR_LOG_KEY) || '[]') || []; } catch (e) { return []; }
+}
+function pushErrLog(item) {
+  const list = getErrLog();
+  list.push(item);
+  while (list.length > ERR_LOG_MAX) list.shift();
+  try { localStorage.setItem(ERR_LOG_KEY, JSON.stringify(list)); } catch (e) {}
+}
+function clearErrLog() {
+  try { localStorage.removeItem(ERR_LOG_KEY); } catch (e) {}
+  showToast('错误日志已清空');
+  rerunSelfCheck();
+}
+
+function selfCheckCollect() {
+  const items = [];
+  const add = (ok, name, detail) => items.push({ ok: !!ok, name: name, detail: detail || '' });
+
+  // 1 关键元素
+  const domMap = [
+    ['chatMessages', '聊天消息容器'], ['messageInput', '输入框'], ['sendBtn', '发送按钮'],
+    ['conversationList', '会话列表'], ['contactsList', '通讯录'], ['lettersList', '信件列表'],
+    ['momentsFeed', '朋友圈流'], ['modalContainer', '弹窗容器'],
+    ['musicFab', '音乐悬浮钮'], ['musicPanel', '音乐面板']
+  ];
+  const missDom = domMap.filter(d => !document.getElementById(d[0])).map(d => d[1]);
+  add(missDom.length === 0, '关键元素', missDom.length ? ('缺：' + missDom.join('、')) : (domMap.length + ' 个都在'));
+
+  // 2 重复 id
+  const idCount = {};
+  document.querySelectorAll('[id]').forEach(el => { idCount[el.id] = (idCount[el.id] || 0) + 1; });
+  const dupIds = Object.keys(idCount).filter(k => idCount[k] > 1);
+  add(dupIds.length === 0, '重复 id', dupIds.length ? (dupIds.slice(0, 5).join('、') + (dupIds.length > 5 ? ' 等' : '')) : '没有重复');
+
+  // 3 内联事件
+  const KW = { if: 1, for: 1, while: 1, switch: 1, return: 1, function: 1, typeof: 1, new: 1, delete: 1, void: 1, catch: 1, else: 1, this: 1, event: 1, alert: 1, console: 1, Math: 1, JSON: 1, Number: 1, String: 1, Boolean: 1, Array: 1, Object: 1, Date: 1, Promise: 1, parseInt: 1, parseFloat: 1, isNaN: 1, encodeURIComponent: 1, decodeURIComponent: 1, setTimeout: 1, clearTimeout: 1 };
+  const attrs = ['onclick', 'oninput', 'onchange', 'onblur', 'onsubmit', 'onkeydown', 'onkeyup'];
+  const badFns = new Set();
+  document.querySelectorAll('[onclick],[oninput],[onchange],[onblur],[onsubmit],[onkeydown],[onkeyup]').forEach(el => {
+    attrs.forEach(a => {
+      const v = el.getAttribute(a);
+      if (!v) return;
+      const re = /([A-Za-z_$][\w$]*)\s*\(/g;
+      let m;
+      while ((m = re.exec(v))) {
+        const fn = m[1];
+        if (KW[fn]) continue;
+        let isFn = false;
+        try { isFn = typeof window[fn] === 'function'; } catch (e) { isFn = false; }
+        if (!isFn) badFns.add(fn);
+      }
+    });
+  });
+  add(badFns.size === 0, '按钮绑定', badFns.size ? ('找不到函数：' + Array.from(badFns).slice(0, 6).join('、')) : '内联事件都接得上');
+
+  // 4 关键函数
+  const fns = ['addMessage', 'renderChatMessages', 'saveData', 'flushSaveData', 'applyTheme', 'initMusicFab',
+    'toggleMusicPanel', 'renderMusicList', 'openSurveyQuickMenu', 'openChatSurveyEditor', 'sendSurveyToContact',
+    'scheduleAutoCall', 'scheduleIncomingLetter', 'showStorageUsage', 'openCallDetail', 'loadMoreMessages',
+    'compressStoredImages', 'openMySurveyLibEditor', 'getMomentsCfg', 'getAutoCallCfg', 'renderMoments'];
+  const missFn = fns.filter(f => typeof window[f] !== 'function');
+  add(missFn.length === 0, '关键函数', missFn.length ? ('缺：' + missFn.join('、')) : (fns.length + ' 个都在'));
+
+  // 5 数据结构
+  let d = null;
+  try { d = appData; } catch (e) { d = null; }
+  const structOk = !!d && typeof d === 'object' && !!d.settings && !!d.chatRecords;
+  add(structOk, '数据结构', structOk ? 'chatRecords / settings 正常' : 'appData 读不到，可能要重新导入备份');
+
+  // 6 消息完整性
+  let msgCount = 0, brokenMsg = 0, convCount = 0;
+  if (d && d.chatRecords && typeof d.chatRecords === 'object') {
+    const keys = Object.keys(d.chatRecords);
+    convCount = keys.length;
+    keys.forEach(k => {
+      const arr = d.chatRecords[k];
+      if (!Array.isArray(arr)) { brokenMsg++; return; }
+      msgCount += arr.length;
+      arr.forEach(m => { if (!m || !m.type) brokenMsg++; });
+    });
+  }
+  add(brokenMsg === 0, '聊天记录', convCount + ' 个会话 · ' + msgCount + ' 条消息' + (brokenMsg ? (' · 异常 ' + brokenMsg + ' 条') : ''));
+
+  // 7 参数
+  let cfgMsg = [];
+  ['getAutoCallCfg', 'getIncomingLetterCfg', 'getMomentsCfg'].forEach(fn => {
+    let ok = false;
+    try { const r = window[fn](); ok = !!r && typeof r === 'object'; } catch (e) { ok = false; }
+    cfgMsg.push((ok ? '' : '✗ ') + fn.replace('get', '').replace('Cfg', ''));
+  });
+  add(cfgMsg.every(x => x.indexOf('✗') !== 0), '参数读取', cfgMsg.join(' · '));
+
+  // 8 存储
+  let rawLen = 0, idbMode = false;
+  try { rawLen = (localStorage.getItem(typeof STORAGE_KEY !== 'undefined' ? STORAGE_KEY : 'vislta_data') || '').length; } catch (e) {}
+  try { idbMode = !!window.__idbMode; } catch (e) {}
+  add(rawLen < 5000000, '本地存储', (rawLen / 1024 / 1024).toFixed(2) + ' MB（约 5 MB 上限）' + (idbMode ? ' · 已切大容量存储' : ''));
+
+  // 9 图片体积
+  let bigImgs = 0, bigMax = 0;
+  if (d && d.chatRecords) {
+    Object.keys(d.chatRecords).forEach(k => {
+      (d.chatRecords[k] || []).forEach(m => {
+        if (m && typeof m.content === 'string' && m.content.slice(0, 5) === 'data:' && m.content.length > 800000) {
+          bigImgs++; bigMax = Math.max(bigMax, m.content.length);
+        }
+      });
+    });
+  }
+  add(bigImgs < 15, '大图', bigImgs ? (bigImgs + ' 张超过 800KB' + (bigMax ? ('，最大 ' + (bigMax / 1024 / 1024).toFixed(1) + ' MB') : '') + '，可用存储弹窗里的「压缩大图」') : '没有特别大的图');
+
+  // 10 音乐
+  let songInfo = '读不到歌单';
+  try {
+    const songs = getCurrentSongs() || [];
+    const bad = songs.filter(x => x && x.bad).length;
+    songInfo = songs.length + ' 首' + (bad ? (' · ' + bad + ' 首标记放不了') : ' · 没有坏标记');
+  } catch (e) { songInfo = '歌单读取报错'; }
+  add(true, '音乐', songInfo);
+
+  // 11 版本一致
+  let pageVer = '';
+  const sc = document.querySelector('script[src*="app.js?v="]');
+  if (sc && sc.getAttribute('src')) {
+    const m2 = sc.getAttribute('src').match(/v=([\d.]+)/);
+    if (m2) pageVer = m2[1];
+  }
+  add(!pageVer || pageVer === SELF_CHECK_VER, '版本', pageVer ? ('页面 ' + pageVer + ' · 代码 ' + SELF_CHECK_VER) : ('没读到版本号 · 代码 ' + SELF_CHECK_VER));
+
+  // 12 错误日志
+  const log = getErrLog();
+  add(log.length === 0, '运行错误', log.length ? ('抓到 ' + log.length + ' 条，看下面') : '没有记录');
+
+  // 13 定时任务
+  const tInfo = [];
+  try { tInfo.push('来电 ' + (autoCallTimer ? '计时中' : '未计时')); } catch (e) { tInfo.push('来电 读不到'); }
+  try { tInfo.push('来信 ' + (incomingLetterTimer && incomingLetterTimer.id ? '计时中' : '未计时')); } catch (e) { tInfo.push('来信 读不到'); }
+  add(true, '定时任务', tInfo.join(' · '));
+
+  return items;
+}
+
+function runSelfCheck() {
+  const items = selfCheckCollect();
+  const bad = items.filter(i => !i.ok);
+  const log = getErrLog().slice(-5).reverse();
+  const okColor = '#4caf50';
+  const body = `
+    <div style="display:flex;gap:10px;align-items:baseline;margin-bottom:10px;">
+      <div style="font-size:14px;font-weight:700;color:${bad.length ? 'var(--danger)' : okColor};">${bad.length ? (bad.length + ' 项要看一下') : '全部正常'}</div>
+      <div style="font-size:11px;color:var(--text-tertiary);">共 ${items.length} 项 · ${new Date().toLocaleTimeString()}</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      ${items.map(i => `
+        <div style="display:flex;gap:8px;padding:7px 9px;border-radius:8px;background:${i.ok ? 'var(--bg-tertiary, #f5f7fa)' : 'var(--danger-soft, #fde8e8)'};">
+          <i class="fas ${i.ok ? 'fa-check' : 'fa-triangle-exclamation'}" style="color:${i.ok ? okColor : 'var(--danger)'};font-size:12px;margin-top:2px;"></i>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:600;">${i.name}</div>
+            ${i.detail ? `<div style="font-size:11px;color:var(--text-tertiary);word-break:break-all;line-height:1.45;">${escapeHtml(i.detail)}</div>` : ''}
+          </div>
+        </div>`).join('')}
+    </div>
+    ${log.length ? `
+      <div style="margin:14px 0 4px;font-size:12px;font-weight:600;">最近错误</div>
+      ${log.map(l => `<div style="font-size:11px;color:var(--text-tertiary);padding:4px 0;border-bottom:1px solid var(--border-color);word-break:break-all;">${new Date(l.t).toLocaleString()} · ${escapeHtml(l.m)} ${l.s ? '· ' + escapeHtml(l.s) : ''}</div>`).join('')}
+    ` : ''}
+  `;
+  const footer = `
+    <button class="btn btn-secondary" onclick="clearErrLog()">清日志</button>
+    <button class="btn btn-secondary" onclick="copySelfCheckReport()">复制</button>
+    <button class="btn btn-primary" onclick="rerunSelfCheck()">重新检测</button>
+  `;
+  window.currentModalId = showModal('自检', body, footer);
+  window.__lastSelfCheck = items;
+}
+
+function rerunSelfCheck() {
+  if (window.currentModalId) closeModal(window.currentModalId);
+  setTimeout(runSelfCheck, 150);
+}
+
+function copySelfCheckReport() {
+  const items = window.__lastSelfCheck || [];
+  const head = 'Vislta ' + SELF_CHECK_VER + ' 自检报告 ' + new Date().toLocaleString();
+  const lines = items.map(i => (i.ok ? 'OK  ' : '!!  ') + i.name + '：' + (i.detail || ''));
+  const text = head + '\n' + lines.join('\n');
+  try {
+    navigator.clipboard.writeText(text).then(function () { showToast('已复制'); }, function () { showToast('复制失败，长按选中也行'); });
+  } catch (e) {
+    showToast('复制失败');
+  }
+}
+
+installErrorTrap();

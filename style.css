@@ -6068,3 +6068,22 @@ html, body {
   border: none !important;
   box-shadow: none !important;
 }
+
+/* v34.7 未读分隔线 */
+.unread-divider {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 10px 6px;
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 500;
+}
+.unread-divider::before,
+.unread-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: currentColor;
+  opacity: .26;
+}
