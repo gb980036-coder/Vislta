@@ -1038,6 +1038,13 @@ let currentPage = 'chat';
 
 function switchPage(pageName) {
   if (currentPage === pageName) return;
+  // v35.1：离开朋友圈就退出多选，别留个条子在屏幕上
+  if (pageName !== 'moments' && typeof momentSelMode !== 'undefined' && momentSelMode) {
+    momentSelMode = false;
+    momentSelIds = [];
+    const _mb = document.getElementById('momentSelBar');
+    if (_mb) _mb.remove();
+  }
   
   document.querySelectorAll('.tab-item').forEach(item => {
     item.classList.toggle('active', item.dataset.page === pageName);
@@ -3282,6 +3289,12 @@ function renderMessageBubble(msg, idx) {
   if (msg.type === 'moments_share') {
     return renderMomentsShareBubble(msg);
   }
+  if (msg.type === 'together_invite') {
+    return renderTogetherInviteBubble(msg);
+  }
+  if (msg.type === 'together_summary') {
+    return renderTogetherSummaryBubble(msg);
+  }
   return `<div class="bubble">${escapeHtml(msg.content)}</div>`;
 }
 
@@ -4855,6 +4868,7 @@ function openMusicSheet() {
   try { setMusicModeIcon(); } catch (e) {}
   const curAu = document.getElementById('musicAudio');
   setMusicPlayIcon(!!curAu && !curAu.paused);
+  window.__musicOpenAt = Date.now();
   if (mask) mask.style.display = 'block';
   panel.style.transform = 'translate(-50%,0)';
   const fab = document.getElementById('musicFab');
@@ -4876,6 +4890,11 @@ function toggleMusicPanel() {
   const mask = document.getElementById('musicMask');
   if (mask && mask.style.display === 'block') closeMusicSheet();
   else openMusicSheet();
+}
+// v35.1：面板刚打开那一下，别被同一次点击的 mask 事件顺手关掉
+function closeMusicSheetGuarded() {
+  if (Date.now() - (window.__musicOpenAt || 0) < 320) return;
+  closeMusicSheet();
 }
 
 function addMusicFromInput() {
@@ -5126,7 +5145,7 @@ function initMusicFab() {
     fab.style.right = 'auto';
     fab.style.bottom = 'auto';
   }
-  let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false, moved = false, lastDragEnd = 0, lastToggleAt = 0;
+  let sx = 0, sy = 0, ox = 0, oy = 0, dragging = false, moved = false, lastDragEnd = 0, lastToggleAt = 0, pressToggled = false, pressOpenTimer = null;
   // v33.4：手指点一下会抖，阈值放宽；拖完不留后遗症
   let justDragged = false;
   fab.addEventListener('pointerdown', function (e) {
@@ -5135,12 +5154,24 @@ function initMusicFab() {
     sx = e.clientX; sy = e.clientY; ox = r.left; oy = r.top;
     moved = false; dragging = true; justDragged = false;
     try { fab.setPointerCapture(e.pointerId); } catch (err) {}
+    // v35.1：按下 90ms 内没动就开，不等松手；一动就是拖动，定时器会取消
+    pressToggled = false;
+    if (pressOpenTimer) { clearTimeout(pressOpenTimer); pressOpenTimer = null; }
+    pressOpenTimer = setTimeout(function () {
+      pressOpenTimer = null;
+      if (!dragging || moved || pressToggled) return;
+      pressToggled = true;
+      lastToggleAt = Date.now();
+      toggleMusicPanel();
+    }, 90);
   });
   fab.addEventListener('pointermove', function (e) {
     if (!dragging) return;
     const dx = e.clientX - sx, dy = e.clientY - sy;
+    if (!moved && pressOpenTimer && (Math.abs(dx) > 2 || Math.abs(dy) > 2)) { clearTimeout(pressOpenTimer); pressOpenTimer = null; }
     if (!moved && Math.abs(dx) < 14 && Math.abs(dy) < 14) return;
     moved = true;
+    if (pressOpenTimer) { clearTimeout(pressOpenTimer); pressOpenTimer = null; }
     const w = fab.offsetWidth || 38, h = fab.offsetHeight || 38;
     const x = Math.max(4, Math.min(window.innerWidth - w - 4, ox + dx));
     const y = Math.max(4, Math.min(window.innerHeight - h - 4, oy + dy));
@@ -5160,14 +5191,22 @@ function initMusicFab() {
       setTimeout(function () { justDragged = false; }, 350);
       saveData();
     } else {
-      // 没拖动 = 点了一下。不单纯依赖 click（有的 WebView 被 pointer capture 吞掉）
-      if (Date.now() - lastToggleAt < 400) return;
-      lastToggleAt = Date.now();
-      toggleMusicPanel();
+      // v35.1：没拖动 = 点了一下，立刻开（拖动的定时器已经被取消）
+      if (pressOpenTimer) { clearTimeout(pressOpenTimer); pressOpenTimer = null; }
+      if (!pressToggled && Date.now() - lastToggleAt >= 400) {
+        pressToggled = true;
+        lastToggleAt = Date.now();
+        toggleMusicPanel();
+      }
     }
   });
-  fab.addEventListener('pointercancel', function () { dragging = false; });
+  fab.addEventListener('pointercancel', function () {
+    dragging = false;
+    if (pressOpenTimer) { clearTimeout(pressOpenTimer); pressOpenTimer = null; }
+  });
   fab.addEventListener('click', function (e) {
+    // v35.1：pointerdown 已经开过了，这次 click 只吞掉
+    if (pressToggled) { pressToggled = false; e.preventDefault(); e.stopPropagation(); return; }
     // 刚拖过就吞掉这次点击；平时点一下立刻开
     if (justDragged) { justDragged = false; e.preventDefault(); e.stopPropagation(); return; }
     if (Date.now() - lastToggleAt < 400) { e.preventDefault(); e.stopPropagation(); return; }
@@ -6961,6 +7000,7 @@ document.getElementById('continueBtn').addEventListener('click', triggerContinue
 
 // 问卷快捷入口
 document.getElementById('surveyBtn').addEventListener('click', openSurveyQuickMenu);
+document.getElementById('togetherBtn').addEventListener('click', function () { openTogetherPicker(); });
 
 document.getElementById('emojiBtn').addEventListener('click', () => {
   const panel = document.getElementById('emojiPanel');
@@ -10434,6 +10474,15 @@ function renderMomentsFeed() {
   }
 
   feed.innerHTML = list.map(m => renderMomentCard(m, false)).join('');
+  // v35.1：多选操作条
+  const oldSelBar = document.getElementById('momentSelBar');
+  if (oldSelBar) oldSelBar.remove();
+  if (momentSelMode) {
+    const bar = document.createElement('div');
+    bar.id = 'momentSelBar';
+    bar.innerHTML = '<span><i class="fas fa-check-double"></i> 已选 ' + momentSelIds.length + ' 条</span><span style="flex:1;"></span><button class="tg-mini" onclick="exitMomentSelect()">取消</button><button class="tg-mini danger" onclick="confirmMomentBatchDelete()">删除</button>';
+    document.body.appendChild(bar);
+  }
 }
 
 // 渲染单条动态卡片（detail=true 时在弹窗内展示全部评论）
@@ -10449,11 +10498,14 @@ function renderMomentCard(m, detail) {
   const hiddenCount = Math.max(0, comments.length - shownComments.length);
 
   const imgCols = m.images.length === 1 ? 1 : (m.images.length === 2 || m.images.length === 4 ? 2 : 3);
+  const selCls = (!detail && momentSelMode && !isMine) ? ' sel-mode' : '';
+  const pickCls = (!detail && momentSelMode && momentSelIds.indexOf(m.id) >= 0) ? ' picked' : '';
+  const cardAttr = detail ? '' : ` onclick="momentCardClick(event,'${m.id}',${isMine})" ontouchstart="momentCardPressStart(event,'${m.id}',${isMine})" ontouchend="momentCardPressEnd()" ontouchmove="momentCardPressMove()"`;
   const imgGrid = m.images.length > 0 ? `
     <div class="moment-img-grid cols-${imgCols}">
       ${m.images.map((img, i) => `
         <img src="${img}" alt="动态图片${i + 1}"
-             onclick="openImagePreview('${img}')"
+             onclick="momentImgClick(event,'${img}')"
              oncontextmenu="event.preventDefault();saveMomentsImage('${img}');return false;"
              ontouchstart="momentImgTouchStart('${img}')"
              ontouchend="momentImgTouchEnd()"
@@ -10466,7 +10518,7 @@ function renderMomentCard(m, detail) {
     : '';
 
   return `
-    <div class="moment-card">
+    <div class="moment-card${selCls}${pickCls}"${cardAttr}>
       <div class="moment-head">
         ${getAvatarHTML(author.avatar, author.name)}
         <div class="moment-author">
@@ -10476,8 +10528,9 @@ function renderMomentCard(m, detail) {
             <span class="moment-vis-tag"><i class="fas ${m.visibility === 'private' ? 'fa-lock' : (m.visibility === 'friends' ? 'fa-user-group' : 'fa-globe')}"></i> ${visLabel[m.visibility]}</span>
           </div>
         </div>
-        ${isMine ? `<button class="moment-del-btn" title="删除" onclick="deleteMoment('${m.id}')"><i class="fas fa-trash"></i></button>` : ''}
+        ${isMine ? `<button class="moment-del-btn" title="删除" onclick="event.stopPropagation();deleteMoment('${m.id}')"><i class="fas fa-trash"></i></button>` : (detail ? '' : `<button class="moment-more-btn" title="更多" onclick="event.stopPropagation();openMomentMoreMenu('${m.id}')"><i class="fas fa-ellipsis"></i></button>`)}
       </div>
+      ${(!detail && momentSelMode && !isMine) ? `<div class="moment-check"><i class="fas fa-check"></i></div>` : ''}
       ${m.text ? `<div class="moment-text">${escapeHtml(m.text)}</div>` : ''}
       ${imgGrid}
       ${viewerText ? `<div class="moment-viewers">${viewerText}${!detail && m.viewers.length > 0 ? `<span class="mc-more" onclick="openMomentDetail('${m.id}')" style="margin-left:auto;">全部访客</span>` : ''}</div>` : ''}
@@ -12266,6 +12319,484 @@ function applyCustomFont() {
 }
 
 // ==================== 应用初始化 ====================
+
+// ==================== v35.1 朋友圈：删除他人动态 + 多选 ====================
+var momentSelMode = false;
+var momentSelIds = [];
+var momentPressTimer = null;
+var momentPressTriggered = false;
+
+function momentCardPressStart(e, id, isMine) {
+  if (momentSelMode || isMine) return;
+  momentPressTriggered = false;
+  if (momentPressTimer) { clearTimeout(momentPressTimer); momentPressTimer = null; }
+  momentPressTimer = setTimeout(function () {
+    momentPressTimer = null;
+    momentPressTriggered = true;
+    try { if (navigator.vibrate) navigator.vibrate(12); } catch (err) {}
+    enterMomentSelect(id);
+    setTimeout(function () { momentPressTriggered = false; }, 500);
+  }, 520);
+}
+function momentCardPressMove() {
+  if (momentPressTimer) { clearTimeout(momentPressTimer); momentPressTimer = null; }
+}
+function momentCardPressEnd() {
+  if (momentPressTimer) { clearTimeout(momentPressTimer); momentPressTimer = null; }
+}
+function momentImgClick(e, src) {
+  if (momentSelMode) { if (e) e.stopPropagation(); return; }
+  openImagePreview(src);
+}
+function momentCardClick(e, id, isMine) {
+  if (momentPressTriggered) { momentPressTriggered = false; return; }
+  if (!momentSelMode || isMine) return;
+  toggleMomentSelect(id);
+}
+function enterMomentSelect(id) {
+  momentSelMode = true;
+  if (id && momentSelIds.indexOf(id) < 0) momentSelIds.push(id);
+  renderMomentsFeed();
+}
+function exitMomentSelect() {
+  momentSelMode = false;
+  momentSelIds = [];
+  renderMomentsFeed();
+}
+function toggleMomentSelect(id) {
+  const i = momentSelIds.indexOf(id);
+  if (i >= 0) momentSelIds.splice(i, 1);
+  else momentSelIds.push(id);
+  if (momentSelIds.length === 0) momentSelMode = false;
+  renderMomentsFeed();
+}
+function openMomentMoreMenu(id) {
+  const m = getMomentById(id);
+  if (!m || isSelf(m.authorId)) return;
+  const body = `
+    <div style="display:flex;flex-direction:column;gap:8px;">
+      <button class="btn btn-secondary" onclick="closeModal(window.currentModalId);deleteOtherMoment('${id}')"><i class="fas fa-trash"></i> 删除这条动态</button>
+      <button class="btn btn-secondary" onclick="closeModal(window.currentModalId);enterMomentSelect('${id}')"><i class="fas fa-check-double"></i> 多选管理</button>
+      <button class="btn btn-secondary" onclick="closeModal(window.currentModalId);openMomentDetail('${id}')"><i class="fas fa-comment"></i> 看详情</button>
+    </div>`;
+  window.currentModalId = showModal('这条动态', body, `<button class="btn btn-secondary" onclick="closeModal(window.currentModalId)">取消</button>`);
+}
+function momentBrief(m) {
+  const t = (m.text || '').replace(/\s+/g, ' ').trim();
+  if (t) return t.length > 24 ? t.slice(0, 24) + '…' : t;
+  return (m.images && m.images.length) ? '（图片 ' + m.images.length + ' 张）' : '（无文字）';
+}
+function deleteOtherMoment(id) {
+  const m = getMomentById(id);
+  if (!m) return;
+  if (isSelf(m.authorId)) { deleteMoment(id); return; }
+  const likes = m.likes ? m.likes.length : 0;
+  const cmts = m.comments ? m.comments.length : 0;
+  const imgs = m.images ? m.images.length : 0;
+  if (!confirm('删除这条动态？\n\n「' + momentBrief(m) + '」\n赞 ' + likes + ' · 评论 ' + cmts + ' · 图片 ' + imgs + '\n\n会一起删掉，5 秒内可以撤销。')) return;
+  const idx = appData.moments.findIndex(function (x) { return x.id === id; });
+  if (idx < 0) return;
+  const removed = appData.moments.splice(idx, 1)[0];
+  saveData();
+  renderMomentsFeed();
+  showUndoBar('已删除 1 条动态', function () {
+    appData.moments.splice(Math.min(idx, appData.moments.length), 0, removed);
+    saveData();
+    renderMomentsFeed();
+    showToast('已恢复');
+  });
+}
+function confirmMomentBatchDelete() {
+  const ids = momentSelIds.slice();
+  if (!ids.length) { showToast('还没选'); return; }
+  if (!confirm('删除选中的 ' + ids.length + ' 条动态？\n点赞、评论、图片会一起删掉，5 秒内可以撤销。')) return;
+  const stash = [];
+  ids.forEach(function (id) {
+    const i = appData.moments.findIndex(function (x) { return x.id === id; });
+    if (i >= 0) { stash.push({ i: i, item: appData.moments[i] }); appData.moments.splice(i, 1); }
+  });
+  stash.sort(function (a, b) { return a.i - b.i; });
+  momentSelMode = false;
+  momentSelIds = [];
+  saveData();
+  renderMomentsFeed();
+  showUndoBar('已删除 ' + stash.length + ' 条动态', function () {
+    stash.forEach(function (x) { appData.moments.splice(Math.min(x.i, appData.moments.length), 0, x.item); });
+    saveData();
+    renderMomentsFeed();
+    showToast('已恢复');
+  });
+}
+var __undoBarTimer = null;
+var __undoAction = null;
+function showUndoBar(text, onUndo) {
+  const old = document.getElementById('undoBar');
+  if (old) old.remove();
+  if (__undoBarTimer) { clearTimeout(__undoBarTimer); __undoBarTimer = null; }
+  const bar = document.createElement('div');
+  bar.id = 'undoBar';
+  bar.className = 'undo-bar';
+  const span = document.createElement('span');
+  span.textContent = text;
+  const btn = document.createElement('button');
+  btn.textContent = '撤销';
+  btn.onclick = function () {
+    if (__undoAction) __undoAction();
+    if (__undoBarTimer) { clearTimeout(__undoBarTimer); __undoBarTimer = null; }
+    __undoAction = null;
+    bar.remove();
+  };
+  bar.appendChild(span);
+  bar.appendChild(btn);
+  document.body.appendChild(bar);
+  __undoAction = onUndo;
+  __undoBarTimer = setTimeout(function () { bar.remove(); __undoAction = null; }, 5200);
+}
+
+// ==================== v35.1 一起听歌 ====================
+var togetherSession = null;
+var togetherTickTimer = null;
+var togetherSwitchTimer = null;
+
+function tgKey(chatType, chatId) { return (chatType === 'group' ? 'group_' : 'contact_') + chatId; }
+function tgFindMsg(chatType, chatId, time) {
+  const arr = appData.chatRecords[tgKey(chatType, chatId)] || [];
+  return arr.find(function (m) { return m.type === 'together_invite' && m.time === time; }) || null;
+}
+function tgSongName(s) { return (s && s.name) ? s.name : '这首歌'; }
+function getTogetherPeer() {
+  if (appData.currentChatType === 'group') return null;
+  return appData.contacts.find(function (c) { return c.id === appData.currentChatId; }) || null;
+}
+function openTogetherPicker(mode) {
+  const switching = (mode === 'switch') && !!togetherSession;
+  if (!switching) {
+    if (appData.currentChatType === 'group') { showToast('一起听只能和单个联系人'); return; }
+    if (!getTogetherPeer()) { showToast('先打开一个会话'); return; }
+  }
+  const all = getCurrentSongs().filter(function (s) { return !s.bad; });
+  if (!all.length) { showToast('歌单空的，先去音乐面板加歌'); return; }
+  const fn = mode === 'switch' ? 'requestTogetherSwitch' : 'sendTogetherInvite';
+  const body = '<div class="tg-pick-list">' + all.map(function (s) {
+    return '<div class="tg-pick-row" onclick="closeModal(window.currentModalId);' + fn + '(\'' + s.id + '\')">' +
+      '<i class="fas fa-music"></i>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div class="tg-pick-name">' + escapeHtml(tgSongName(s)) + '</div>' +
+        '<div class="tg-pick-artist">' + escapeHtml(s.artist || '') + '</div>' +
+      '</div></div>';
+  }).join('') + '</div>';
+  window.currentModalId = showModal('一起听 · 选一首', body, '<button class="btn btn-secondary" onclick="closeModal(window.currentModalId)">取消</button>');
+}
+function sendTogetherInvite(songId) {
+  const peer = getTogetherPeer();
+  const s = getCurrentSongs().find(function (x) { return x.id === songId; });
+  if (!peer || !s) return;
+  const time = Date.now();
+  const chatType = appData.currentChatType;
+  const chatId = appData.currentChatId;
+  addMessage({
+    type: 'together_invite', sender: getSelfId(), time: time,
+    tg: { songId: s.id, songName: tgSongName(s), artist: s.artist || '', cover: '', status: 'pending', from: 'me', expireAt: time + 5 * 60000 }
+  });
+  appData.settings.togetherLastInviteAt = time;
+  saveData();
+  setTimeout(function () {
+    const msg = tgFindMsg(chatType, chatId, time);
+    if (!msg || !msg.tg || msg.tg.status !== 'pending') return;
+    if (Math.random() < 0.78) {
+      msg.tg.status = 'accepted';
+      saveData();
+      if (appData.currentChatId === chatId && appData.currentChatType === chatType) renderChatMessages();
+      startTogether(chatType, chatId, msg.tg, time);
+    } else {
+      msg.tg.status = 'rejected';
+      saveData();
+      addMessageTo(chatType, chatId, {
+        type: 'text', sender: chatId, time: Date.now(),
+        content: randomPick(['现在不太方便，晚点吧', '手上有点事，等下再听', '这首下次听，好不好'])
+      });
+      if (appData.currentChatId === chatId) renderChatMessages();
+    }
+  }, randomInt(1400, 2800));
+}
+function acceptTogetherInvite(time) {
+  const chatType = appData.currentChatType;
+  const chatId = appData.currentChatId;
+  const msg = tgFindMsg(chatType, chatId, time);
+  if (!msg || !msg.tg || msg.tg.status !== 'pending') return;
+  msg.tg.status = 'accepted';
+  saveData();
+  renderChatMessages();
+  startTogether(chatType, chatId, msg.tg, time);
+}
+function rejectTogetherInvite(time) {
+  const chatType = appData.currentChatType;
+  const chatId = appData.currentChatId;
+  const msg = tgFindMsg(chatType, chatId, time);
+  if (!msg || !msg.tg || msg.tg.status !== 'pending') return;
+  msg.tg.status = 'rejected';
+  saveData();
+  renderChatMessages();
+  setTimeout(function () {
+    addMessageTo(chatType, chatId, { type: 'text', sender: chatId, time: Date.now(), content: randomPick(['好吧，那下次', '嗯，改天']) });
+    if (appData.currentChatId === chatId) renderChatMessages();
+  }, 1200);
+}
+function startTogether(chatType, chatId, tg, inviteTime) {
+  if (togetherSession && togetherSession.chatType === chatType && togetherSession.chatId === chatId && togetherSession.songId === tg.songId) {
+    if (inviteTime) togetherSession.inviteTime = inviteTime;
+    openTogetherPanel();
+    return;
+  }
+  togetherSession = {
+    chatType: chatType, chatId: chatId, inviteTime: inviteTime || null,
+    songId: tg.songId, songName: tg.songName || '这首歌', artist: tg.artist || '',
+    count: 1, songs: [tg.songName || '这首歌'], startedAt: Date.now()
+  };
+  openTogetherPanel();
+  loadTogetherSong({ id: tg.songId, name: tg.songName, artist: tg.artist });
+  scheduleTogetherPeerSwitch();
+}
+function loadTogetherSong(song) {
+  if (!song || !song.id) return;
+  if (togetherSession) {
+    togetherSession.songId = song.id;
+    togetherSession.songName = song.name || togetherSession.songName;
+    togetherSession.artist = song.artist || '';
+    if (song.name && togetherSession.songs.indexOf(song.name) < 0) togetherSession.songs.push(song.name);
+  }
+  const box = document.getElementById('togetherAudioBox');
+  if (box) box.innerHTML = '<audio id="togetherAudio" preload="none" src="' + musicStreamUrl(song.id) + '"></audio>';
+  const au = document.getElementById('togetherAudio');
+  if (au) {
+    au.addEventListener('error', function () {
+      if (au.dataset.bk === '1') { setTgPlayIcon(false); return; }
+      au.dataset.bk = '1';
+      au.src = musicStreamUrl(song.id, true);
+      const p = au.play();
+      if (p && p.catch) p.catch(function () {});
+    });
+    const p = au.play();
+    if (p && p.catch) p.catch(function () { setTgPlayIcon(false); });
+    au.addEventListener('ended', function () {
+      if (!togetherSession) return;
+      const pool = getCurrentSongs().filter(function (x) { return !x.bad; });
+      if (!pool.length) return;
+      let i = pool.findIndex(function (x) { return x.id === togetherSession.songId; });
+      if (i < 0) i = 0;
+      const nx = pool[(i + 1) % pool.length];
+      togetherSession.count++;
+      loadTogetherSong({ id: nx.id, name: tgSongName(nx), artist: nx.artist || '' });
+    });
+  }
+  updateTogetherHero();
+  setTgPlayIcon(true);
+}
+function updateTogetherHero() {
+  const sess = togetherSession;
+  const title = document.getElementById('tgTitle');
+  const artist = document.getElementById('tgArtist');
+  if (title) title.textContent = sess ? sess.songName : '还没开始';
+  if (artist) artist.textContent = sess ? (sess.artist || '一起听') : '';
+  const meAv = document.getElementById('tgMeAv');
+  const peerAv = document.getElementById('tgPeerAv');
+  if (meAv && meAv.dataset.done !== '1') { meAv.innerHTML = getAvatarHTML(getSelfAvatar(), getSelfName()); meAv.dataset.done = '1'; }
+  if (peerAv && peerAv.dataset.done !== '1' && sess) {
+    const c = appData.contacts.find(function (x) { return x.id === sess.chatId; });
+    if (c) { peerAv.innerHTML = getAvatarHTML(c.avatar, c.name); peerAv.dataset.done = '1'; }
+  }
+}
+function setTgPlayIcon(playing) {
+  const btn = document.getElementById('tgPlayBtn');
+  if (btn) btn.innerHTML = '<i class="fas fa-' + (playing ? 'pause' : 'play') + '"></i>';
+}
+function openTogetherPanel() {
+  const panel = document.getElementById('togetherPanel');
+  const mask = document.getElementById('togetherMask');
+  if (!panel || !togetherSession) return;
+  updateTogetherHero();
+  const peer = appData.contacts.find(function (x) { return x.id === togetherSession.chatId; });
+  const note = document.getElementById('tgNote');
+  if (note) note.textContent = (peer ? peer.name : 'TA') + ' 在另一边听着';
+  if (mask) mask.style.display = 'block';
+  panel.style.transform = 'translate(-50%,0)';
+  window.__togetherOpenAt = Date.now();
+  const au = document.getElementById('togetherAudio');
+  if (au && au.paused) { const p = au.play(); if (p && p.catch) p.catch(function () {}); }
+  setTgPlayIcon(!!au && !au.paused);
+  if (togetherTickTimer) clearInterval(togetherTickTimer);
+  togetherTickTimer = setInterval(togetherTick, 500);
+}
+function closeTogetherPanel() {
+  const panel = document.getElementById('togetherPanel');
+  const mask = document.getElementById('togetherMask');
+  if (panel) panel.style.transform = 'translate(-50%,110%)';
+  if (mask) setTimeout(function () { mask.style.display = 'none'; }, 300);
+  if (togetherTickTimer) { clearInterval(togetherTickTimer); togetherTickTimer = null; }
+  const au = document.getElementById('togetherAudio');
+  if (au && !au.paused) au.pause();
+  setTgPlayIcon(false);
+}
+function reopenTogether(time) {
+  const msg = tgFindMsg(appData.currentChatType, appData.currentChatId, time);
+  if (!msg) return;
+  if (!togetherSession || togetherSession.songId !== msg.tg.songId) startTogether(appData.currentChatType, appData.currentChatId, msg.tg, time);
+  else openTogetherPanel();
+}
+function toggleTogetherPlay() {
+  const au = document.getElementById('togetherAudio');
+  if (!au) return;
+  if (au.paused) { const p = au.play(); if (p && p.catch) p.catch(function () {}); }
+  else au.pause();
+  setTimeout(function () { setTgPlayIcon(!au.paused); }, 80);
+}
+function seekTogether(v) {
+  const au = document.getElementById('togetherAudio');
+  if (!au || !au.duration) return;
+  au.currentTime = (v / 1000) * au.duration;
+}
+function togetherTick() {
+  const au = document.getElementById('togetherAudio');
+  const cur = document.getElementById('tgCur');
+  const dur = document.getElementById('tgDur');
+  const seek = document.getElementById('tgSeek');
+  if (!au) return;
+  const d = isFinite(au.duration) ? au.duration : 0;
+  if (cur) cur.textContent = fmtTime(au.currentTime || 0);
+  if (dur) dur.textContent = d ? fmtTime(d) : '--:--';
+  if (seek) seek.value = d ? Math.round((au.currentTime / d) * 1000) : 0;
+  setTgPlayIcon(!au.paused);
+}
+function togetherSwitchAsk() { openTogetherPicker('switch'); }
+function requestTogetherSwitch(songId) {
+  const s = getCurrentSongs().find(function (x) { return x.id === songId; });
+  if (!s) return;
+  const note = document.getElementById('tgNote');
+  if (note) note.innerHTML = '<i class="fas fa-hourglass-half"></i> 等 TA 点头…';
+  setTimeout(function () {
+    if (!togetherSession) return;
+    const n = document.getElementById('tgNote');
+    if (Math.random() < 0.82) {
+      togetherSession.count++;
+      loadTogetherSong({ id: s.id, name: tgSongName(s), artist: s.artist || '' });
+      if (n) n.innerHTML = '<i class="fas fa-check"></i> TA 说这首好听';
+    } else {
+      if (n) n.textContent = 'TA 想再听会儿这首';
+    }
+  }, randomInt(1200, 2200));
+}
+function scheduleTogetherPeerSwitch() {
+  if (togetherSwitchTimer) clearTimeout(togetherSwitchTimer);
+  togetherSwitchTimer = setTimeout(function () {
+    if (!togetherSession) return;
+    const pool = getCurrentSongs().filter(function (x) { return !x.bad && x.id !== togetherSession.songId; });
+    if (pool.length && Math.random() < 0.5) {
+      const s = randomPick(pool);
+      const note = document.getElementById('tgNote');
+      if (note) {
+        note.innerHTML = 'TA 想换成《' + escapeHtml(tgSongName(s)) + '》 <button class="tg-mini primary" onclick="tgAcceptPeerSwitch(\'' + s.id + '\')">好</button><button class="tg-mini" onclick="tgDeclinePeerSwitch()">不用</button>';
+      }
+      togetherSession.pendingPeerSong = s;
+    }
+    scheduleTogetherPeerSwitch();
+  }, randomInt(60000, 130000));
+}
+function tgAcceptPeerSwitch(songId) {
+  if (!togetherSession) return;
+  const s = getCurrentSongs().find(function (x) { return x.id === songId; });
+  const note = document.getElementById('tgNote');
+  if (s) {
+    togetherSession.count++;
+    loadTogetherSong({ id: s.id, name: tgSongName(s), artist: s.artist || '' });
+    if (note) note.textContent = '换成了《' + tgSongName(s) + '》';
+  }
+  togetherSession.pendingPeerSong = null;
+}
+function tgDeclinePeerSwitch() {
+  const note = document.getElementById('tgNote');
+  if (note) note.textContent = '还是听这首';
+  if (togetherSession) togetherSession.pendingPeerSong = null;
+}
+function endTogether() {
+  if (!togetherSession) { closeTogetherPanel(); return; }
+  if (!confirm('结束一起听？')) return;
+  const sess = togetherSession;
+  const mins = Math.max(1, Math.round((Date.now() - sess.startedAt) / 60000));
+  closeTogetherPanel();
+  const au = document.getElementById('togetherAudio');
+  if (au) au.pause();
+  if (sess.inviteTime) {
+    const im = tgFindMsg(sess.chatType, sess.chatId, sess.inviteTime);
+    if (im && im.tg) im.tg.status = 'ended';
+  }
+  addMessageTo(sess.chatType, sess.chatId, {
+    type: 'together_summary', sender: getSelfId(), time: Date.now(),
+    tg: { count: sess.count, minutes: mins, songs: sess.songs.slice() }
+  });
+  togetherSession = null;
+  saveData();
+  if (togetherSwitchTimer) { clearTimeout(togetherSwitchTimer); togetherSwitchTimer = null; }
+}
+function maybePeerTogetherInvite() {
+  if (appData.settings.togetherAutoOff === true) return;
+  const last = appData.settings.togetherLastInviteAt || 0;
+  if (Date.now() - last < 20 * 3600 * 1000) return;
+  if (Math.random() > 0.35) return;
+  const pool = (appData.contacts || []).filter(function (c) { return !c.deleted; });
+  if (!pool.length) return;
+  const songs = getCurrentSongs().filter(function (s) { return !s.bad; });
+  if (!songs.length) return;
+  const c = randomPick(pool);
+  const s = randomPick(songs);
+  const time = Date.now();
+  addMessageTo('contact', c.id, {
+    type: 'together_invite', sender: c.id, time: time,
+    tg: { songId: s.id, songName: tgSongName(s), artist: s.artist || '', cover: '', status: 'pending', from: 'peer', expireAt: time + 5 * 60000 }
+  });
+  appData.settings.togetherLastInviteAt = time;
+  saveData();
+}
+function renderTogetherInviteBubble(msg) {
+  const tg = msg.tg || {};
+  const mine = isSelf(msg.sender);
+  const expired = tg.status === 'pending' && tg.expireAt && Date.now() > tg.expireAt;
+  const st = expired ? 'expired' : (tg.status || 'pending');
+  let tag = '';
+  if (st === 'accepted') tag = '<span class="tg-tag ok">已经开始</span>';
+  else if (st === 'ended') tag = '<span class="tg-tag">已结束</span>';
+  else if (st === 'rejected') tag = '<span class="tg-tag">TA 没接</span>';
+  else if (st === 'expired') tag = '<span class="tg-tag">已过期</span>';
+  else tag = mine ? '<span class="tg-tag">等 TA 回应</span>' : '<span class="tg-tag">邀请你一起听</span>';
+  let btns = '';
+  if (st === 'pending' && !mine) {
+    btns = '<div class="tg-actions"><button class="tg-btn primary" onclick="event.stopPropagation();acceptTogetherInvite(' + msg.time + ')">接受</button><button class="tg-btn" onclick="event.stopPropagation();rejectTogetherInvite(' + msg.time + ')">不用了</button></div>';
+  } else if (st === 'accepted') {
+    btns = '<div class="tg-actions"><button class="tg-btn primary" onclick="event.stopPropagation();reopenTogether(' + msg.time + ')"><i class="fas fa-headphones"></i> 回到一起听</button></div>';
+  }
+  return '<div class="bubble tg-card">' +
+    '<div class="tg-top">' +
+      '<div class="tg-cover"><i class="fas fa-music"></i></div>' +
+      '<div style="flex:1;min-width:0;">' +
+        '<div class="tg-name">' + escapeHtml(tg.songName || '一起听') + '</div>' +
+        '<div class="tg-sub">' + escapeHtml(tg.artist || '陪我听完这首') + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="tg-row-tag"><i class="fas fa-headphones"></i> 一起听 ' + tag + '</div>' +
+    btns +
+  '</div>';
+}
+function renderTogetherSummaryBubble(msg) {
+  const tg = msg.tg || {};
+  const names = (tg.songs || []).slice(0, 3).map(function (x) { return escapeHtml(String(x)); }).join('、');
+  return '<div class="bubble tg-card tg-summary">' +
+    '<div class="tg-row-tag"><i class="fas fa-headphones"></i> 一起听 · 结束了</div>' +
+    '<div class="tg-name" style="margin-top:6px;">听了 ' + (tg.count || 1) + ' 首，共 ' + (tg.minutes || 1) + ' 分钟</div>' +
+    '<div class="tg-sub">' + names + ((tg.songs || []).length > 3 ? ' 等' : '') + '</div>' +
+  '</div>';
+}
+setTimeout(function () { try { maybePeerTogetherInvite(); } catch (e) {} }, 12000);
+setInterval(function () { try { maybePeerTogetherInvite(); } catch (e) {} }, 20 * 60 * 1000);
+
 function init() {
   loadData();
   initTheme();
@@ -12368,7 +12899,7 @@ setTimeout(function () {
 
 
 // ==================== 自检 / 诊断（v34.6） ====================
-const SELF_CHECK_VER = '35.0';
+const SELF_CHECK_VER = '35.1';
 const ERR_LOG_KEY = 'vislta_error_log';
 const ERR_LOG_MAX = 80;
 

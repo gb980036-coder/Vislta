@@ -8,8 +8,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Vislta</title>
 <link rel="stylesheet" href="https://fastly.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.1/css/all.min.css">
-<link rel="stylesheet" href="style.css?v=35.0">
-<link rel="stylesheet" href="perf.css?v=35.0">
+<link rel="stylesheet" href="style.css?v=35.1">
+<link rel="stylesheet" href="perf.css?v=35.1">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#3a7bd5">
 <meta name="mobile-web-app-capable" content="yes">
@@ -110,6 +110,7 @@
             <div class="tool-btn" id="imageBtn" title="图片"><i class="fas fa-image"></i></div>
             <div class="tool-btn" id="continueBtn" title="说话（触发对方回复，无需发消息）"><i class="fas fa-microphone"></i></div>
             <div class="tool-btn" id="surveyBtn" title="问卷"><i class="fas fa-clipboard-list"></i></div>
+            <div class="tool-btn" id="togetherBtn" title="一起听"><i class="fas fa-headphones"></i></div>
             <div class="tool-btn" id="redpacketBtn" title="发红包 / 转账"><i class="fas fa-gift"></i></div>
             <input type="file" id="imageUpload" accept="image/*" style="display:none;">
           </div>
@@ -1386,7 +1387,7 @@
 <!-- 音乐悬浮按钮 -->
 <div id="musicFab" title="拖动可移动，点一下开音乐" style="touch-action:none;cursor:grab;position:fixed;right:12px;bottom:84px;z-index:9000;width:44px;height:44px;border-radius:50%;background:rgba(28,28,32,.5);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,.18);cursor:pointer;font-size:14px;"><i class="fas fa-music"></i></div>
 
-<div id="musicMask" onclick="closeMusicSheet()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9000;"></div>
+<div id="musicMask" onclick="closeMusicSheetGuarded()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9000;"></div>
 <div id="musicPanel" style="position:fixed;left:50%;bottom:0;transform:translate(-50%,105%);transition:transform .3s cubic-bezier(.2,.8,.2,1);width:min(480px,100vw);max-height:82vh;background:var(--bg-secondary,#fff);border-radius:22px 22px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.28);z-index:9001;display:flex;flex-direction:column;overflow:hidden;">
   <div style="flex:0 0 auto;padding:8px 0 8px;display:flex;justify-content:center;"><div style="width:38px;height:4px;border-radius:2px;background:var(--border-color,#ddd);"></div></div>
   <div style="flex:0 0 auto;padding:2px 16px 4px;display:flex;align-items:center;justify-content:space-between;">
@@ -1431,6 +1432,31 @@
   </div>
 </div>
 
-<script src="app.js?v=35.0"></script>
+<!-- v35.1 一起听面板 -->
+<div id="togetherMask" onclick="closeTogetherPanel()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9190;"></div>
+<div id="togetherPanel" style="position:fixed;left:50%;bottom:0;transform:translate(-50%,110%);transition:transform .3s cubic-bezier(.2,.8,.2,1);width:min(480px,100vw);background:var(--bg-secondary,#fff);border-radius:22px 22px 0 0;box-shadow:0 -10px 40px rgba(0,0,0,.3);z-index:9200;padding:14px 16px calc(18px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:12px;">
+  <div class="tg-head"><span><i class="fas fa-headphones"></i> 一起听</span><i class="fas fa-times" style="color:var(--text-tertiary);cursor:pointer;" onclick="closeTogetherPanel()"></i></div>
+  <div class="tg-people"><div id="tgMeAv"></div><div class="tg-link"><i class="fas fa-wave-square"></i></div><div id="tgPeerAv"></div></div>
+  <div class="tg-hero">
+    <div class="tg-cover big"><i class="fas fa-music"></i></div>
+    <div style="flex:1;min-width:0;">
+      <div class="tg-name" id="tgTitle">还没开始</div>
+      <div class="tg-sub" id="tgArtist"></div>
+    </div>
+  </div>
+  <div class="tg-progress">
+    <span id="tgCur">0:00</span>
+    <input id="tgSeek" type="range" min="0" max="1000" value="0" oninput="seekTogether(this.value)">
+    <span id="tgDur">--:--</span>
+  </div>
+  <div class="tg-note" id="tgNote">在另一边听着</div>
+  <div class="tg-ctrl">
+    <button class="tg-btn" onclick="togetherSwitchAsk()"><i class="fas fa-arrows-rotate"></i> 换歌</button>
+    <button class="tg-btn primary" id="tgPlayBtn" style="flex:0 0 56px;height:48px;" onclick="toggleTogetherPlay()"><i class="fas fa-pause"></i></button>
+    <button class="tg-btn danger" onclick="endTogether()">结束</button>
+  </div>
+  <div id="togetherAudioBox" style="display:none;"></div>
+</div>
+<script src="app.js?v=35.1"></script>
 </body>
 </html>

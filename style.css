@@ -6087,3 +6087,50 @@ html, body {
   background: currentColor;
   opacity: .26;
 }
+
+/* ==================== v35.1 ==================== */
+.moment-more-btn{position:absolute;top:10px;right:10px;width:26px;height:26px;border-radius:50%;border:none;background:var(--bg-tertiary,#f2f2f4);color:var(--text-secondary,#888);font-size:12px;display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:3;}
+.moment-card.sel-mode{cursor:pointer;}
+.moment-card.sel-mode .moment-more-btn{display:none;}
+.moment-card.picked{box-shadow:0 0 0 2px var(--primary) inset;border-radius:14px;}
+.moment-check{position:absolute;top:10px;right:10px;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--border-color,#ddd);background:var(--bg-secondary,#fff);display:flex;align-items:center;justify-content:center;font-size:11px;color:transparent;z-index:4;}
+.moment-card.picked .moment-check{background:var(--primary);border-color:var(--primary);color:#fff;}
+#momentSelBar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:9300;display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:16px;background:rgba(32,32,36,.94);color:#fff;box-shadow:0 8px 30px rgba(0,0,0,.35);font-size:13px;max-width:94vw;width:max-content;}
+#momentSelBar .tg-mini{background:rgba(255,255,255,.18);color:#fff;}
+#momentSelBar .tg-mini.danger{background:#e2564f;color:#fff;}
+.tg-mini{border:none;border-radius:9px;padding:6px 10px;font-size:12px;background:var(--bg-tertiary,#f2f2f4);color:var(--text-primary,#222);cursor:pointer;margin-left:4px;}
+.tg-mini.primary{background:var(--primary);color:#fff;}
+.undo-bar{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(80px + env(safe-area-inset-bottom,0px));z-index:9400;display:flex;align-items:center;gap:14px;padding:10px 14px;border-radius:14px;background:rgba(32,32,36,.94);color:#fff;font-size:13px;box-shadow:0 8px 26px rgba(0,0,0,.32);max-width:92vw;}
+.undo-bar button{border:none;background:transparent;color:#7fb7ff;font-size:13px;font-weight:600;cursor:pointer;padding:2px 4px;}
+
+.tg-card{padding:10px 12px;}
+.tg-top{display:flex;gap:10px;align-items:center;}
+.tg-cover{width:48px;height:48px;border-radius:12px;background:linear-gradient(135deg,#8fb8e8,#b9a8e8);display:flex;align-items:center;justify-content:center;color:#fff;font-size:17px;background-size:cover;background-position:center;flex:0 0 auto;}
+.tg-cover.big{width:54px;height:54px;border-radius:14px;font-size:20px;}
+.tg-name{font-size:14px;font-weight:600;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tg-sub{font-size:11px;color:var(--text-tertiary,#999);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tg-row-tag{margin-top:9px;font-size:11px;color:var(--text-secondary,#666);display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+.tg-tag{color:var(--text-tertiary,#999);}
+.tg-tag.ok{color:var(--primary);}
+.tg-actions{display:flex;gap:8px;margin-top:10px;}
+.tg-btn{flex:1;border:none;border-radius:11px;padding:9px 10px;font-size:12px;background:var(--bg-tertiary,#f2f2f4);color:var(--text-primary,#222);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;}
+.tg-btn.primary{background:var(--primary);color:#fff;}
+.tg-btn.danger{background:rgba(226,86,79,.12);color:#d0453e;}
+.tg-summary .tg-name{white-space:normal;}
+
+.tg-pick-list{max-height:56vh;overflow:auto;}
+.tg-pick-row{display:flex;gap:10px;align-items:center;padding:10px 6px;border-bottom:1px solid var(--border-color,#eee);cursor:pointer;}
+.tg-pick-row i{color:var(--primary);font-size:13px;width:16px;text-align:center;}
+.tg-pick-name{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.tg-pick-artist{font-size:11px;color:var(--text-tertiary,#999);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+
+.tg-head{display:flex;align-items:center;justify-content:space-between;font-size:14px;font-weight:600;color:var(--text-secondary,#555);}
+.tg-people{display:flex;align-items:center;justify-content:center;gap:16px;}
+.tg-people .avatar{width:44px;height:44px;}
+.tg-link{color:var(--primary);font-size:14px;}
+.tg-hero{display:flex;align-items:center;gap:12px;}
+.tg-progress{display:flex;align-items:center;gap:8px;}
+.tg-progress span{font-size:11px;color:var(--text-tertiary,#999);width:38px;text-align:center;}
+.tg-progress input[type=range]{flex:1;height:4px;accent-color:var(--primary);}
+.tg-note{font-size:12px;color:var(--text-secondary,#666);text-align:center;min-height:18px;}
+.tg-ctrl{display:flex;gap:10px;align-items:center;}
