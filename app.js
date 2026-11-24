@@ -4757,6 +4757,28 @@ function importPlaylistPrompt() {
   }).catch(function () { showToast('歌单抓不到，换个链接试试'); });
 }
 
+// 音乐面板「检查」：全部重探一遍（之前探过的也重来）
+function checkMusicList() {
+  const list = getCurrentList();
+  if (!list || !Array.isArray(list.songs) || !list.songs.length) { showToast('这个歌单是空的'); return; }
+  list.songs.forEach(function (s) { delete s.probe; });
+  showToast('开始检查 ' + list.songs.length + ' 首，慢慢来');
+  probeList(list, 3);
+}
+// 音乐面板「清✕」：把标记成放不了的删掉
+function removeBadSongs() {
+  const list = getCurrentList();
+  if (!list || !Array.isArray(list.songs)) { showToast('歌单读不到'); return; }
+  const bad = list.songs.filter(function (s) { return s && s.bad; });
+  if (!bad.length) { showToast('没有标记成放不了的歌'); return; }
+  if (!confirm('删掉 ' + bad.length + ' 首放不了的？删了就找不回来了')) return;
+  const before = list.songs.length;
+  list.songs = list.songs.filter(function (s) { return !(s && s.bad); });
+  saveData();
+  renderMusicList();
+  renderMusicListSelect();
+  showToast('删掉 ' + (before - list.songs.length) + ' 首');
+}
 let musicProbeToken = 0;
 function probeList(list, concurrency) {
   if (!list || !Array.isArray(list.songs)) return;
@@ -12346,7 +12368,7 @@ setTimeout(function () {
 
 
 // ==================== 自检 / 诊断（v34.6） ====================
-const SELF_CHECK_VER = '34.9';
+const SELF_CHECK_VER = '35.0';
 const ERR_LOG_KEY = 'vislta_error_log';
 const ERR_LOG_MAX = 80;
 
@@ -12416,6 +12438,8 @@ function selfCheckCollect() {
       let m;
       while ((m = re.exec(v))) {
         const fn = m[1];
+        // 前面带点的是方法调用（document.getElementById / Math.max / event.stopPropagation）
+        if (m.index > 0 && v.charAt(m.index - 1) === '.') continue;
         if (KW[fn]) continue;
         let isFn = false;
         try { isFn = typeof window[fn] === 'function'; } catch (e) { isFn = false; }
@@ -12429,7 +12453,7 @@ function selfCheckCollect() {
   const fns = ['addMessage', 'renderChatMessages', 'saveData', 'flushSaveData', 'applyTheme', 'initMusicFab',
     'toggleMusicPanel', 'renderMusicList', 'openSurveyQuickMenu', 'openChatSurveyEditor', 'sendSurveyToContact',
     'scheduleAutoCall', 'scheduleIncomingLetter', 'showStorageUsage', 'openCallDetail', 'loadMoreMessages',
-    'compressStoredImages', 'openMySurveyLibEditor', 'getMomentsCfg', 'getAutoCallCfg', 'renderMoments'];
+    'compressStoredImages', 'openMySurveyLibEditor', 'getMomentsCfg', 'getAutoCallCfg', 'renderMomentsFeed'];
   const missFn = fns.filter(f => typeof window[f] !== 'function');
   add(missFn.length === 0, '关键函数', missFn.length ? ('缺：' + missFn.join('、')) : (fns.length + ' 个都在'));
 
